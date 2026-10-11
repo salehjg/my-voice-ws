@@ -35,19 +35,19 @@ def get_language(code: str) -> Language:
         raise ValueError(f"unsupported language {code!r} (known: {', '.join(LANGUAGES)})") from None
 
 
-_MODE_RE = re.compile(r"^\s*([a-z]{2})\s*(?:-|->|2|→|_to_)\s*([a-z]{2})\s*$")
+_DIRECTION_RE = re.compile(r"^\s*([a-z]{2})\s*(?:-|->|2|→|_to_)\s*([a-z]{2})\s*$")
 
 
-def parse_mode(mode: str, languages: Sequence[str]) -> tuple[str, str] | None:
+def parse_direction(direction: str, languages: Sequence[str]) -> tuple[str, str] | None:
     """Return ``(src, tgt)`` for a fixed direction, or ``None`` for automatic detection."""
-    if mode.strip().lower() == "auto":
+    if direction.strip().lower() == "auto":
         return None
-    m = _MODE_RE.match(mode.lower())
+    m = _DIRECTION_RE.match(direction.lower())
     if not m:
-        raise ValueError(f"mode must be 'auto' or like 'it-en', got {mode!r}")
+        raise ValueError(f"direction must be 'auto' or like 'it-en', got {direction!r}")
     src, tgt = m.groups()
     if {src, tgt} != set(languages):
-        raise ValueError(f"mode {mode!r} does not match the language pair {list(languages)}")
+        raise ValueError(f"direction {direction!r} does not match the language pair {list(languages)}")
     return src, tgt
 
 

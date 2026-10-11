@@ -20,15 +20,19 @@ def tone(seconds=0.8, amp=0.3):
 
 
 class FakeMic:
-    """Each start() queues the next clip (cycling) followed by 3 s of silence."""
+    """Each start() queues the next clip followed by 3 s of silence. The clips cycle; with
+    ``cycle=False`` each plays once and later starts give silence only."""
 
-    def __init__(self, clips):
-        self.clips, self.n = clips, 0
+    def __init__(self, clips, cycle=True):
+        self.clips, self.n, self.cycle = clips, 0, cycle
         self.blocks = queue.Queue()
         self.starts = self.stops = 0
 
     def start(self):
-        clip = self.clips[self.n % len(self.clips)]
+        if self.cycle or self.n < len(self.clips):
+            clip = self.clips[self.n % len(self.clips)]
+        else:
+            clip = np.zeros(0, np.float32)
         self.n += 1
         self.starts += 1
         audio = np.concatenate([np.zeros(4000, np.float32), clip, np.zeros(3 * SAMPLE_RATE, np.float32)])
@@ -50,6 +54,19 @@ class FakeAsr:
         self.calls.append(forced_language)
         lang = forced_language or "it"
         return Transcript(self.texts[lang], lang, 0.99, -0.1, 0.01)
+
+
+class DetectAsr(FakeAsr):
+    """Detects the languages in ``detect``, one per call (a forced language is used as given)."""
+
+    def __init__(self, detect, prob=0.99):
+        super().__init__()
+        self.detect, self.prob = list(detect), prob
+
+    def transcribe(self, audio, allowed, forced_language=None):
+        self.calls.append(forced_language)
+        lang = forced_language or self.detect.pop(0)
+        return Transcript(self.texts[lang], lang, 1.0 if forced_language else self.prob, -0.1, 0.01)
 
 
 class FakeMt:
@@ -106,7 +123,7 @@ def make_app(keys, clips=None, **overrides):
 
 @pytest.mark.parametrize("raw,key", [
     (b" ", "space"), (b"\r", "enter"), (b"\n", "enter"), (b"\x1b", "esc"), (b"\x1b[A", "up"),
-    (b"Q", "q"), (b"e", "e"), (b"?", "?"), (b"\x7f", "backspace"), (b"\x04", "ctrl-d"), (b"", None),
+    (b"Q", "q"), (b"e", "e"), (b"?", "?"), (b"\x7f", "backspace"), (b"\x04", "ctrl-d"), (b"\t", "tab"), (b"", None),
 ])
 def test_decode_key(raw, key):
     assert decode_key(raw) == key
@@ -274,3 +291,92 @@ def test_errors_are_shown_and_the_app_keeps_going():
     assert "voice exploded" in text
     assert text.count("voice exploded") == 2  # typed answer + their next turn, both survived
     assert app.engine.mt.calls == [("Hello", "en", "it"), ("Buongiorno, come sta?", "it", "en")]
+
+
+# --------------------------------------------------------------------------- auto mode
+
+
+class AutoKeys(ScriptedKeys):
+    """Auto mode only polls for keys: the next key comes once the microphone has nothing left."""
+
+    def __init__(self, keys, mic):
+        super().__init__(keys)
+        self.mic = mic
+
+    def get(self, timeout=None):
+        if timeout is not None and timeout < 0.5 and not self.mic.blocks.empty():
+            return None
+        return self.keys.pop(0) if self.keys else "q"
+
+
+def make_auto_app(keys, clips, detect=(), prob=0.99, **overrides):
+    sets = {"vad.backend": '"energy"', "general.session_log_dir": '""', "audio.playback_tail_ms": 0, **overrides}
+    cfg = load_config(overrides=[f"{k}={v}" for k, v in sets.items()])
+    engine = Engine(cfg, DetectAsr(detect, prob), FakeMt(), FakeTts())
+    out = io.StringIO()
+    mic = FakeMic(clips, cycle=False)
+    app = TalkApp(engine, cfg, AutoKeys(keys, mic), console=Console(file=out, width=140),
+                  player=FakePlayer(), mic_factory=lambda: mic, save_choices=False)
+    return app, out, mic
+
+
+def gap(seconds=2.0):
+    return np.zeros(int(seconds * SAMPLE_RATE), np.float32)
+
+
+def test_auto_mode_translates_whatever_it_hears():
+    # Italian -> spoken in English; mic paused while speaking; English -> spoken in Italian
+    app, out, mic = make_auto_app(["q"], [tone(0.8), tone(1.6)], detect=["it", "en"])
+    app.run("auto")
+    eng = app.engine
+    assert eng.asr.calls == [None, None]  # language detected, not forced
+    assert eng.mt.calls == [("Buongiorno, come sta?", "it", "en"), ("Very well, thank you.", "en", "it")]
+    assert eng.tts.spoken == [("en", "<en> Buongiorno, come sta?"), ("it", "<it> Very well, thank you.")]
+    assert len(app.player.played) == 2
+    assert mic.starts == 3 and mic.stops == 3  # restarted after each translation; stopped on quit
+    text = out.getvalue()
+    assert "auto mode" in text and "Italian → English" in text and "English → Italian" in text
+
+
+def test_auto_mode_with_headphones_keeps_listening():
+    app, _, mic = make_auto_app(["q"], [np.concatenate([tone(0.8), gap(), tone(1.6)])], detect=["it", "en"],
+                                **{"audio.half_duplex": "false"})
+    app.run("auto")
+    assert len(app.engine.mt.calls) == 2 and len(app.player.played) == 2
+    assert mic.starts == 1  # never paused
+
+
+def test_auto_mode_my_audio_off_only_speaks_their_language():
+    app, _, _ = make_auto_app(["q"], [np.concatenate([tone(0.8), gap(), tone(1.6)])], detect=["it", "en"],
+                              **{"talk.speak_to_me": "false"})
+    app.run("auto")
+    assert len(app.engine.mt.calls) == 2
+    assert app.engine.tts.spoken == [("it", "<it> Very well, thank you.")]
+
+
+def test_auto_mode_wrong_language_redo_and_unsure_hint():
+    app, out, _ = make_auto_app(["w", "q"], [tone(0.8)], detect=["it"], prob=0.6)
+    app.run("auto")
+    assert app.engine.asr.calls == [None, "en"]  # redone as the other language
+    assert app.engine.mt.calls[-1] == ("Very well, thank you.", "en", "it")
+    text = out.getvalue()
+    assert "60% sure" in text and "Redone" in text
+
+
+def test_auto_mode_type_replay_and_help():
+    app, out, _ = make_auto_app(["t", "Ciao a tutti", "r", "h", "q"], [np.zeros(100, np.float32)])
+    app.run("auto")
+    assert app.engine.mt.calls == [("Ciao a tutti", "it", "en")]  # language guessed from the words
+    assert len(app.player.played) == 2  # spoken + replay
+    assert "wrong language" in out.getvalue()  # auto mode help
+
+
+def test_pause_then_switch_modes_both_ways():
+    # auto: SPACE pauses, TAB -> manual; manual: TAB -> auto; Q quits
+    app, out, mic = make_auto_app(["space", "tab", "tab", "q"], [np.zeros(100, np.float32)])
+    app.run("auto")
+    text = out.getvalue()
+    assert "Paused" in text
+    assert text.index("auto mode ·") < text.index("manual mode ·") < text.rindex("auto mode ·")
+    assert mic.starts == 2 and mic.stops == 2  # the mic is off in manual mode until you record
+    assert app.engine.mt.calls == []

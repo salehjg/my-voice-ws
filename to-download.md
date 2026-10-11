@@ -2,22 +2,22 @@
 
 Two steps need internet: the Python environment, then the model files. After that, the translator
 runs fully offline. **On this laptop both are done** (Oct 2026); this file is for a fresh setup or a
-rebuild. Both scripts can be re-run at any time: packages and files that are already there are
+rebuild. Both commands can be re-run at any time: packages and files that are already there are
 skipped.
 
 | Step | What | Size | Command |
 |---|---|---|---|
-| 1 | Python env `myvoice` (torch + CUDA libs, faster-whisper, llama.cpp, Piper, Kokoro, …) | ~5 GB | `bash scripts/setup_env.sh` |
-| 2 | Model weights into `./models` (Whisper, TranslateGemma, 7 Piper voices, Kokoro) | ~5.8 GB | `bash scripts/download_models.sh` |
-| 3 | Verify (offline) | none | `./run.sh check && ./run.sh selftest` |
+| 1 | Python env `myvoice` (torch + CUDA libs, faster-whisper, llama.cpp, Piper, Kokoro, …) | ~5 GB | `./myvoice.py setup` |
+| 2 | Model weights into `./models` (Whisper, TranslateGemma, 7 Piper voices, Kokoro) | ~5.8 GB | `./myvoice.py download` |
+| 3 | Verify (offline) | none | `./myvoice.py check && ./myvoice.py selftest` |
 
 > **Disk:** the root partition had only about 43 GB free (96 % used) when this was written. Budget
-> ~10 GB for the defaults. Both scripts use `pip --no-cache-dir` / direct-to-folder downloads so
+> ~10 GB for the defaults. Both commands use `pip --no-cache-dir` / direct-to-folder downloads so
 > nothing is duplicated in caches.
 
-> **Toolchain:** every script sources `/home/saleh/00_software/dir_install/setvars.all.sh` first (via
-> `env.sh`), as required before using PyTorch/CUDA. If you run commands by hand, always start with
-> `source env.sh`, or at least `source /home/saleh/00_software/dir_install/setvars.all.sh`.
+> **Toolchain:** `./myvoice.py` sources `/home/saleh/00_software/dir_install/setvars.all.sh` by itself
+> before anything else, as required before using PyTorch/CUDA (any `python3` can start it). If you run
+> commands by hand, always start with `source /home/saleh/00_software/dir_install/setvars.all.sh && conda activate myvoice`.
 
 ---
 
@@ -25,7 +25,7 @@ skipped.
 
 ```bash
 cd /workspace/02_ws/my-voice-ws
-bash scripts/setup_env.sh                       # default (llama.cpp backend, compiled for this machine)
+./myvoice.py setup                              # default (llama.cpp backend, compiled for this machine)
 # options:
 #   --with-transformers   also install transformers/accelerate/bitsandbytes (HF-checkpoint backend)
 #   --llama-prebuilt      use the prebuilt CUDA wheel instead of compiling (only works on AVX-512 CPUs)
@@ -39,7 +39,7 @@ conda create -y -n myvoice -c conda-forge python=3.12 pip
 conda activate myvoice
 pip install --no-cache-dir torch==2.9.1 --index-url https://download.pytorch.org/whl/cu129
 pip install --no-cache-dir -r requirements.txt
-# llama-cpp-python: compiled for this CPU + sm_89 (the exact CMAKE_ARGS are in scripts/setup_env.sh)
+# llama-cpp-python: compiled for this CPU + sm_89 (the exact CMAKE_ARGS are in src/myvoice/install.py)
 NV=/home/saleh/00_software/dir_install/nvhpc25.7/Linux_x86_64/25.7
 CC=/usr/bin/gcc-13 CXX=/usr/bin/g++-13 CUDACXX=$NV/cuda/12.9/bin/nvcc CMAKE_ARGS="-DGGML_CUDA=on ..." \
     pip install --no-cache-dir --no-binary llama-cpp-python llama-cpp-python==0.3.36
@@ -49,17 +49,19 @@ pip install --no-cache-dir -r requirements-transformers.txt
 
 | Package | Why |
 |---|---|
-| `torch==2.9.1` (cu129) | Silero VAD, optional transformers backend. Its `nvidia-cublas-cu12` / `nvidia-cudnn-cu12` (cuDNN 9) wheels are also what CTranslate2 and llama.cpp load (`env.sh` puts them on `LD_LIBRARY_PATH`). This torch build is the one that already works on this GPU in `py312ml`. |
+| `torch==2.9.1` (cu129) | Silero VAD, optional transformers backend. Its `nvidia-cublas-cu12` / `nvidia-cudnn-cu12` (cuDNN 9) wheels are also what CTranslate2 and llama.cpp load (`./myvoice.py` puts them on `LD_LIBRARY_PATH`). This torch build is the one that already works on this GPU in `py312ml`. |
 | `faster-whisper==1.2.1`, `ctranslate2` | Whisper ASR on CUDA (needs CUDA 12 + cuDNN 9) |
 | `llama-cpp-python==0.3.36` (compiled locally, CUDA 12.9) | runs the GGUF translation LLM on the GPU |
 | `piper-tts==1.8.0` (+ `onnxruntime`) | neural TTS, one voice per language (uses system `espeak-ng`, already installed) |
 | `silero-vad==6.2.3` | voice activity detection; **the model is bundled in the wheel**, nothing else to download |
 | `sounddevice` | microphone/speaker via PortAudio (system `portaudio`, already installed) |
 | `jinja2`, `scipy`, `numpy` | chat-template rendering, resampling |
-| `huggingface_hub` | the `hf` CLI for manual/gated downloads (the step-2 script itself uses `curl`) |
-| `pytest` | unit tests |
+| `huggingface_hub` | the `hf` CLI for manual/gated downloads (`./myvoice.py download` itself uses plain HTTPS) |
+| `rich`, `typer` | the terminal UI and the command line |
+| `kokoro-onnx` | Kokoro voices |
+| `pytest` | unit tests (`./myvoice.py test`) |
 
-The setup script finishes by running `./run.sh check`. At that point every package line should be
+`./myvoice.py setup` finishes by running `check`. At that point every package line should be
 `ok` and only the `model:` / `voice:` lines should fail.
 
 **Why llama-cpp-python is compiled locally.** The prebuilt CUDA wheel
@@ -70,24 +72,24 @@ code. This laptop's i9-13950HX has no AVX-512, so the wheel crashes with
 uses `/usr/bin/g++-13` as host compiler, because nvcc 12.9 rejects the default GCC 15/16. CUDA 12.9's
 `crt/math_functions.h` also clashes with Arch's glibc 2.44 (`exception specification is
 incompatible with that of previous function "sinpi"`; CUDA 13 fixes this). So
-`scripts/patch_cuda_glibc.sh` creates `build/cuda-12.9-glibc/`, a symlink copy of the NVHPC toolkit
+setup (`patch_cuda_glibc` in `src/myvoice/install.py`) creates `build/cuda-12.9-glibc/`, a symlink copy of the NVHPC toolkit
 with that one header patched (`noexcept` added to six declarations), and the build uses that. The
-NVHPC install is not modified. The build takes roughly 5–15 minutes. To rebuild after a failure, run `bash scripts/setup_env.sh` again; installed
-packages are skipped.
+NVHPC install is not modified. The build takes roughly 5–15 minutes. To rebuild after a failure, run `./myvoice.py setup` again;
+installed packages are skipped.
 
 ---
 
 ## Step 2: Models (~5.8 GB)
 
 ```bash
-bash scripts/download_models.sh                       # everything below
-bash scripts/download_models.sh --only voices         # just one group: whisper | llm | voices | kokoro
-bash scripts/download_models.sh --llm translategemma-q4   # a different LLM (see alternatives)
-bash scripts/download_models.sh --asr large-v3        # + optional Whisper large-v3 (3.1 GB, see below)
+./myvoice.py download                          # everything below
+./myvoice.py download --only voices            # just one group: whisper | llm | voices | kokoro
+./myvoice.py download --llm translategemma-q4  # a different LLM (see alternatives)
+./myvoice.py download --asr large-v3           # + optional Whisper large-v3 (3.1 GB, see below)
 ```
 
-The script downloads over plain HTTPS with `curl` and can be resumed. If the connection drops, it
-retries from where it stopped. If it gives up or you press Ctrl+C, run the same command again: the
+Downloads go over plain HTTPS and can be resumed. If the connection drops, it retries from where
+it stopped. If it gives up or you press Ctrl+C, run the same command again: the
 partial file (`*.part`) is continued and **finished files are skipped** (a re-run with everything
 present takes a second and downloads nothing). Each file is checked against its size and sha256
 before it is moved into place.
@@ -119,7 +121,7 @@ HTTP. Its default Xet transfer can abort on a slow or unstable line with
 `CAS Client Error: ... error decoding response body`.
 
 ```bash
-source env.sh && export HF_HUB_OFFLINE=0 HF_HUB_DISABLE_XET=1   # env.sh enables offline mode; turn it off just for downloading
+source /home/saleh/00_software/dir_install/setvars.all.sh && conda activate myvoice && export HF_HUB_DISABLE_XET=1
 
 hf download mobiuslabsgmbh/faster-whisper-large-v3-turbo \
     --local-dir models/whisper/faster-whisper-large-v3-turbo
@@ -161,11 +163,11 @@ Why these:
 - **Kokoro + Piper**: both run on the CPU, leaving the GPU for Whisper + the LLM. In a round-trip
   test (voice speaks → Whisper transcribes → compare), Kokoro was the most intelligible in Italian.
   Piper voices are lighter and faster. Kokoro also has many more English voices
-  (`./run.sh voices --all`).
+  (`./myvoice.py voices --all`).
 
 ### Alternatives (optional)
 
-**Translation LLM.** Pick one with `--llm <name>`. The script prints the config lines to change.
+**Translation LLM.** Pick one with `./myvoice.py download --llm <name>`. It prints the config lines to change.
 
 | `--llm` | Repo / file | Size | `prompt_style` | Notes |
 |---|---|---|---|---|
@@ -176,19 +178,19 @@ Why these:
 | `gemma4-e4b` | `ggml-org/gemma-4-E4B-it-GGUF` / `gemma-4-E4B-it-Q4_0.gguf` | 4.59 GB | `chat` | Apache-2.0; tight on 8 GB, use `asr.compute_type=int8_float16` |
 
 **No-download fallback.** `Qwen/Qwen2.5-7B-Instruct` is already complete in `~/.cache/huggingface`
-(15 GB of safetensors). With the transformers backend (`setup_env.sh --with-transformers`) it
+(15 GB of safetensors). With the transformers backend (`./myvoice.py setup --with-transformers`) it
 runs in 4-bit NF4 (~5.5 GB VRAM):
 
 ```bash
-./run.sh live --set translation.backend=transformers --set translation.model=Qwen/Qwen2.5-7B-Instruct \
-              --set translation.prompt_style=chat --set asr.compute_type=int8_float16
+./myvoice.py --set translation.backend=transformers --set translation.model=Qwen/Qwen2.5-7B-Instruct \
+             --set translation.prompt_style=chat --set asr.compute_type=int8_float16
 ```
 
 **Original TranslateGemma checkpoint** (transformers backend, gated, ~8.6 GB). Accept the license
 at <https://huggingface.co/google/translategemma-4b-it>, then:
 
 ```bash
-source env.sh && export HF_HUB_OFFLINE=0 HF_HUB_DISABLE_XET=1
+source /home/saleh/00_software/dir_install/setvars.all.sh && conda activate myvoice && export HF_HUB_DISABLE_XET=1
 hf auth login
 hf download google/translategemma-4b-it --local-dir models/llm/translategemma-4b-it
 # run with: --set translation.backend=transformers --set translation.model=models/llm/translategemma-4b-it
@@ -198,7 +200,7 @@ hf download google/translategemma-4b-it --local-dir models/llm/translategemma-4b
 on this laptop, but **not used by default**. On 192 accented-English test sentences (24 non-native
 speakers, background noise) it scored 4.3–4.5 % word errors against turbo's 4.6 %, while being
 50–60 % slower. To try it anyway:
-`./run.sh talk --set asr.model=models/whisper/faster-whisper-large-v3 --set asr.compute_type=int8_float16`.
+`./myvoice.py --set asr.model=models/whisper/faster-whisper-large-v3 --set asr.compute_type=int8_float16`.
 To free the space: `rm -rf models/whisper/faster-whisper-large-v3`.
 
 ---
@@ -206,14 +208,14 @@ To free the space: `rm -rf models/whisper/faster-whisper-large-v3`.
 ## Step 3: Verify (offline)
 
 ```bash
-./run.sh check        # packages, CUDA libs, model files: all lines should be ok
-./run.sh selftest     # a voice speaks an IT and an EN sentence -> Whisper -> LLM -> voice; prints timings + VRAM
-./run.sh              # the conversation app (see README)
+./myvoice.py check      # packages, CUDA libs, model files: all lines should be ok
+./myvoice.py selftest   # a voice speaks an IT and an EN sentence -> Whisper -> LLM -> voice; prints timings + VRAM
+./myvoice.py            # the conversation app (see README)
 ```
 
 ## Runtime is offline
 
-`env.sh` (used by `run.sh`) sets `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1`. Every model is
+`./myvoice.py` sets `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1` for the app. Every model is
 then loaded from a local path (`local_files_only=True` for Whisper and transformers; plain file
 paths for GGUF, Piper and Kokoro), the Silero VAD comes from inside its wheel, and Kokoro's
 phonemizer (espeak-ng) is bundled with its pip package. Nothing is fetched

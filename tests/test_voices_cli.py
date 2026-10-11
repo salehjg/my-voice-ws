@@ -82,11 +82,16 @@ def test_file_mic_cycles_files(tmp_path):
 runner = CliRunner()
 
 
-def test_cli_help_lists_commands():
+def test_cli_help_lists_commands_and_modes():
     r = runner.invoke(app, ["--help"])
     assert r.exit_code == 0
-    for cmd in ("talk", "live", "file", "text", "voices", "check", "selftest"):
-        assert cmd in r.output
+    for word in ("--manual", "--auto", "file", "text", "voices", "setup", "download", "check", "selftest", "test"):
+        assert word in r.output
+
+
+def test_cli_auto_and_manual_together_is_an_error():
+    r = runner.invoke(app, ["-a", "-m"])
+    assert r.exit_code == 2
 
 
 def test_cli_config_error_exit_code():

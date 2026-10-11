@@ -1,12 +1,10 @@
-"""The speech-to-speech pipeline: VAD -> ASR (Whisper) -> MT (LLM) -> TTS (Piper) -> speaker."""
+"""The speech-to-speech pipeline: ASR (Whisper) -> MT (LLM) -> TTS (Kokoro/Piper), plus file translation."""
 
 from __future__ import annotations
 
 import json
 import logging
-import queue
 import subprocess
-import threading
 import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
@@ -15,10 +13,10 @@ from typing import TYPE_CHECKING, Callable
 
 import numpy as np
 
-from .audio import Player, concat_with_gaps, open_mic, read_audio, resample, write_wav
+from .audio import concat_with_gaps, read_audio, resample, write_wav
 from .config import Config
-from .langs import guess_text_language, other_language, parse_mode
-from .vad import SAMPLE_RATE, Segmenter, Utterance, make_vad
+from .langs import guess_text_language, other_language, parse_direction
+from .vad import SAMPLE_RATE, Segmenter, make_vad
 
 if TYPE_CHECKING:
     from .asr import Transcript, WhisperAsr
@@ -80,7 +78,7 @@ class Engine:
         self.mt = mt
         self.tts = tts
         self.languages = list(cfg.general.languages)
-        self.fixed = parse_mode(cfg.general.mode, self.languages)
+        self.fixed = parse_direction(cfg.general.direction, self.languages)
 
     @classmethod
     def load(cls, cfg: Config, need_asr: bool = True, need_tts: bool = True) -> Engine:
@@ -145,7 +143,7 @@ class Engine:
     def process_audio(self, audio: np.ndarray, speak: bool = True, src: str | None = None) -> TurnResult | None:
         """One utterance (float32 mono 16 kHz) -> transcript, translation and speech.
 
-        ``src`` fixes the spoken language (no detection); otherwise the mode decides.
+        ``src`` fixes the spoken language (no detection); otherwise ``general.direction`` decides.
         """
         timings: dict[str, float] = {}
         t0 = time.perf_counter()
@@ -165,7 +163,7 @@ class Engine:
         return self._finish(r, speak)
 
     def process_text(self, text: str, src: str | None = None, speak: bool = True) -> TurnResult:
-        """Text -> translation (+ speech). An explicit ``src`` wins over the mode."""
+        """Text -> translation (+ speech). An explicit ``src`` wins over ``general.direction``."""
         if src is None and self.fixed:
             src, tgt = self.fixed
         else:
@@ -189,132 +187,6 @@ class SessionLog:
         if self.path is not None:
             with open(self.path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(r.to_json(), ensure_ascii=False) + "\n")
-
-
-class MicGate:
-    """Mutes microphone processing while (and shortly after) a translation is playing."""
-
-    def __init__(self) -> None:
-        self._lock = threading.Lock()
-        self._closed = False
-        self._reopen_at = 0.0
-
-    def close(self) -> None:
-        with self._lock:
-            self._closed = True
-
-    def open_after(self, seconds: float) -> None:
-        with self._lock:
-            self._closed = False
-            self._reopen_at = time.monotonic() + seconds
-
-    def is_open(self) -> bool:
-        with self._lock:
-            return not self._closed and time.monotonic() >= self._reopen_at
-
-
-class LiveSession:
-    """Real-time loop. Threads: PortAudio callback -> segmenter -> worker (ASR/MT/TTS) -> player."""
-
-    def __init__(self, engine: Engine, cfg: Config, printer: Callable[[str], None] = print) -> None:
-        self.engine = engine
-        self.cfg = cfg
-        self.print = printer
-        self.segmenter = Segmenter(make_vad(cfg.vad), cfg.vad)
-        self.mic = open_mic(cfg.audio.sample_rate, cfg.audio.block_ms, cfg.audio.input_device)
-        self.player = Player(cfg.audio.output_device)
-        self.gate = MicGate()
-        self.log = SessionLog(cfg)
-        self.stop = threading.Event()
-        self.utterances: queue.Queue[Utterance] = queue.Queue()
-        self.playback: queue.Queue[TurnResult] = queue.Queue()
-
-    # -- threads
-    def _segment_loop(self) -> None:
-        muted = False
-        while not self.stop.is_set():
-            try:
-                block = self.mic.blocks.get(timeout=0.1)
-            except queue.Empty:
-                continue
-            if self.cfg.audio.half_duplex and not self.gate.is_open():
-                if not muted:
-                    self.segmenter.reset()
-                    muted = True
-                continue
-            muted = False
-            was_speaking = self.segmenter.in_speech
-            for utt in self.segmenter.feed(block):
-                self.utterances.put(utt)
-            if self.segmenter.in_speech and not was_speaking:
-                log.debug("speech started")
-
-    def _work_loop(self) -> None:
-        while not self.stop.is_set():
-            try:
-                utt = self.utterances.get(timeout=0.1)
-            except queue.Empty:
-                continue
-            try:
-                r = self.engine.process_audio(utt.audio)
-            except Exception:  # noqa: BLE001 - keep the session alive
-                log.exception("failed to process utterance")
-                continue
-            if r is None:
-                continue
-            self.print(format_turn(r))
-            self.log.write(r)
-            if r.audio.size:
-                self.playback.put(r)
-
-    def _play_loop(self) -> None:
-        while not self.stop.is_set():
-            try:
-                r = self.playback.get(timeout=0.1)
-            except queue.Empty:
-                continue
-            # Don't talk over the speaker: wait for a pause (bounded).
-            deadline = time.monotonic() + self.cfg.audio.max_wait_for_silence_s
-            while self.segmenter.in_speech and time.monotonic() < deadline and not self.stop.is_set():
-                time.sleep(0.05)
-            if self.cfg.audio.half_duplex:
-                self.gate.close()
-            try:
-                self.player.play(r.audio, r.sample_rate)
-            except Exception:  # noqa: BLE001
-                log.exception("playback failed")
-            finally:
-                self.gate.open_after(self.cfg.audio.playback_tail_ms / 1000)
-
-    def run(self) -> None:
-        threads = [
-            threading.Thread(target=self._segment_loop, name="segmenter", daemon=True),
-            threading.Thread(target=self._work_loop, name="worker", daemon=True),
-            threading.Thread(target=self._play_loop, name="player", daemon=True),
-        ]
-        self.mic.start()
-        for t in threads:
-            t.start()
-        mode = self.cfg.general.mode
-        self.print(
-            f"Listening ({'auto ' + '/'.join(self.engine.languages) if mode == 'auto' else mode}). "
-            f"{'Half-duplex: mic muted during playback. ' if self.cfg.audio.half_duplex else ''}Ctrl+C to quit."
-        )
-        if self.log.path:
-            self.print(f"Transcript: {self.log.path}")
-        try:
-            while not self.stop.is_set():
-                time.sleep(0.2)
-        except KeyboardInterrupt:
-            self.print("\nstopping...")
-        finally:
-            self.stop.set()
-            self.player.stop()
-            self.mic.stop()
-            for t in threads:
-                t.join(timeout=2)
-            if self.mic.overflows:
-                log.warning("%d audio blocks dropped (input overflow)", self.mic.overflows)
 
 
 def translate_file(
@@ -357,7 +229,7 @@ SELFTEST_SENTENCES = {
 
 
 def selftest(engine: Engine, cfg: Config, out_dir: Path) -> bool:
-    """No microphone needed: speak a sentence with Piper, then run it through the whole pipeline."""
+    """No microphone needed: a voice speaks a sentence, then it runs through the whole pipeline."""
     assert engine.tts is not None and engine.asr is not None
     ok = True
     for src in engine.languages:

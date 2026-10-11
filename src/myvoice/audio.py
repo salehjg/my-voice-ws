@@ -148,7 +148,7 @@ def find_device(spec: str, kind: str) -> int | None:
         i for i, d in enumerate(sd.query_devices()) if spec.lower() in d["name"].lower() and d[channel_key] > 0
     ]
     if not matches:
-        raise ValueError(f"no {kind} device matches {spec!r}; run `./run.sh devices` to list them")
+        raise ValueError(f"no {kind} device matches {spec!r}; run `./myvoice.py devices` to list them")
     if len(matches) > 1:
         log.warning("several %s devices match %r, using #%d", kind, spec, matches[0])
     return matches[0]

@@ -2,40 +2,42 @@
 #
 # Relative paths are resolved against the directory containing this file.
 # Any value can be overridden on the command line, e.g.
-#   ./run.sh live --set asr.compute_type=int8_float16 --set general.mode=it-en
+#   ./myvoice.py --set asr.compute_type=int8_float16 --set general.direction=it-en
 # Choices you make inside the app (voices, on/off toggles) are saved to config.local.toml,
 # which overrides this file. Delete config.local.toml to go back to these defaults.
 
 [general]
-# "auto"  : detect Italian/English per utterance and translate into the other one
+# Translation direction (auto mode, `file`, `text`):
+# "auto"  : detect Italian/English per sentence and translate into the other one
 # "it-en" : always Italian -> English (skips language detection)
 # "en-it" : always English -> Italian
-mode = "auto"
+direction = "auto"
 languages = ["it", "en"]        # the language pair (first is the "home" language)
-session_log_dir = "outputs"     # one JSONL transcript per live session; "" disables it
+session_log_dir = "outputs"     # one JSONL transcript per conversation; "" disables it
 warmup = true                   # run one dummy pass at start-up so the first utterance is fast
 
 [talk]
-# The conversation app (`./run.sh`, i.e. `./run.sh talk`): they speak their language, you answer in yours.
+# The conversation app (`./myvoice.py`). Auto mode translates every sentence it hears; manual mode
+# (`-m`): they speak their language, you answer in yours.
 their_language = "it"
 my_language = "en"
-speak_to_me = true              # also read the translation of what they said aloud (key A toggles)
-confirm_my_speech = true        # show what was heard from you and wait for Enter before translating (key C toggles)
-their_end_silence_ms = 1000     # this much silence ends their turn
+speak_to_me = true              # also speak translations into your language, not only show them (key A toggles)
+confirm_my_speech = true        # manual mode: show what was heard from you, wait for Enter before translating (key C)
+their_end_silence_ms = 1000     # manual mode: this much silence ends their turn
 my_end_silence_ms = 1500        # ...and yours (longer, so thinking pauses don't cut you off)
+auto_end_silence_ms = 1000      # auto mode: this much silence ends a sentence
 no_speech_timeout_s = 15.0      # stop listening if nobody starts talking
 max_record_s = 60.0             # longest single recording
 
 [audio]
-input_device = ""               # device index or name substring ("" = system default); see `./run.sh devices`
+input_device = ""               # device index or name substring ("" = system default); see `./myvoice.py devices`
 output_device = ""
 sample_rate = 16000             # rate fed to VAD/ASR (mic is resampled if it cannot capture at 16 kHz)
 block_ms = 32
-# With speakers the microphone hears the translation; half-duplex mutes the mic while
-# the translation is playing. Set to false when using headphones.
+# With speakers the microphone hears the translation, so auto mode pauses the mic while a
+# translation is spoken. With headphones set it to false (or use --headphones) to keep listening.
 half_duplex = true
-playback_tail_ms = 300          # keep the mic muted a little after playback (room echo)
-max_wait_for_silence_s = 8.0    # wait for the speaker to pause before playing a translation
+playback_tail_ms = 300          # keep the mic paused a little after playback (room echo)
 
 [vad]
 backend = "silero"              # "silero" (bundled with the silero-vad pip package) | "energy"
@@ -72,7 +74,7 @@ dtype = "bfloat16"
 
 [tts]
 # A voice is a Piper voice name (e.g. "it_IT-paola-medium", found under piper_dir) or a Kokoro
-# voice "kokoro:<name>" (e.g. "kokoro:im_nicola"). `./run.sh voices` lists the installed ones;
+# voice "kokoro:<name>" (e.g. "kokoro:im_nicola"). `./myvoice.py voices` lists the installed ones;
 # key V in the app switches voices and remembers the choice.
 use_cuda = false                # Piper is faster than real time on CPU; true needs onnxruntime-gpu
 length_scale = 1.0              # >1 = slower speech (both engines)
@@ -83,7 +85,8 @@ kokoro_model = "models/kokoro/kokoro-v1.0.onnx"
 kokoro_voices = "models/kokoro/voices-v1.0.bin"
 
 [tts.voices]
-# Kokoro voices were the most intelligible in a Whisper round-trip test (see README); the Piper
-# voices (e.g. "it_IT-paola-medium", "en_US-ryan-high") are lighter and work without Kokoro.
-it = "kokoro:if_sara"
-en = "kokoro:af_heart"
+# Male Kokoro voices by default (female: "kokoro:if_sara", "kokoro:af_heart"). Kokoro was the most
+# intelligible in a Whisper round-trip test (see README); the Piper voices (e.g. "it_IT-paola-medium",
+# "en_US-ryan-high") are lighter and work without Kokoro.
+it = "kokoro:im_nicola"
+en = "kokoro:am_michael"

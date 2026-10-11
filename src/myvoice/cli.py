@@ -1,4 +1,5 @@
-"""Command line interface (Typer + Rich). ``./run.sh`` with no command starts the talk app."""
+"""Command line interface (Typer + Rich). ``./myvoice.py`` with no command starts the conversation
+app in auto mode (``-m``: manual mode)."""
 
 from __future__ import annotations
 
@@ -22,8 +23,11 @@ app = typer.Typer(
     add_completion=False,
     rich_markup_mode="rich",
     context_settings={"help_option_names": ["-h", "--help"]},
-    help="Offline Italian ⇄ English speech translator. Run without a command to start the "
-    "conversation app ([bold]talk[/bold]).",
+    help="Offline Italian ⇄ English speech translator.\n\n"
+    "Without a command it starts the conversation app. [bold]Auto mode[/bold] (default, [bold]-a[/bold]) "
+    "translates everything the microphone hears, Italian or English, and speaks it in the other language. "
+    "[bold]Manual mode[/bold] ([bold]-m[/bold]): keys start and skip each step. [bold]TAB[/bold] switches "
+    "between them in the app.",
 )
 
 # Options shared by several commands
@@ -32,7 +36,7 @@ SetOpt = Annotated[
     Optional[list[str]],
     typer.Option("--set", metavar="SECTION.KEY=VALUE", help="Override a config value, e.g. --set asr.beam_size=1 (repeatable)."),
 ]
-ModeOpt = Annotated[Optional[str], typer.Option("--mode", help="auto | it-en | en-it (direction; default from config).")]
+DirectionOpt = Annotated[Optional[str], typer.Option("--direction", "-d", help="auto | it-en | en-it (default: auto-detect).")]
 VerboseOpt = Annotated[bool, typer.Option("--verbose", "-v", help="Debug logging (prompts, timings).")]
 InputOpt = Annotated[Optional[str], typer.Option("--input-device", help="Microphone: index or name part (see `devices`).")]
 OutputOpt = Annotated[Optional[str], typer.Option("--output-device", help="Speaker: index or name part (see `devices`).")]
@@ -56,12 +60,12 @@ def _setup_logging(verbose: bool, quiet: bool = False) -> None:
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
 
-def _config(config: Path | None, sets: list[str] | None, mode: str | None = None,
+def _config(config: Path | None, sets: list[str] | None, direction: str | None = None,
             input_device: str | None = None, output_device: str | None = None,
             extra: list[str] | None = None) -> Config:
     overrides = list(sets or [])
-    if mode:
-        overrides.append(f'general.mode="{mode}"')
+    if direction:
+        overrides.append(f'general.direction="{direction}"')
     if input_device:
         overrides.append(f'audio.input_device="{input_device}"')
     if output_device:
@@ -81,74 +85,58 @@ def _load_engine(cfg: Config, need_asr: bool = True, need_tts: bool = True, warm
         try:
             engine = Engine.load(cfg, need_asr=need_asr, need_tts=need_tts)
         except FileNotFoundError as e:
-            err_console.print(f"[red]missing model:[/red] {e}\nRun [bold]./run.sh check[/bold] to see what is missing.")
+            err_console.print(f"[red]missing model:[/red] {e}\nRun [bold]./myvoice.py check[/bold] to see what is missing.")
             raise typer.Exit(1) from None
         if warmup and cfg.general.warmup:
             engine.warmup()
     return engine
 
 
+TRANSLATE, SETUP = "Translate without the app", "Voices, setup and checks"
+PASSTHROUGH = {"allow_extra_args": True, "ignore_unknown_options": True}
+
+
 @app.callback(invoke_without_command=True)
-def _default(ctx: typer.Context) -> None:
-    if ctx.invoked_subcommand is None:
-        ctx.invoke(talk)
-
-
-@app.command()
-def talk(
-    config: ConfigOpt = None,
-    set_: SetOpt = None,
+def _start(
+    ctx: typer.Context,
+    auto: Annotated[bool, typer.Option("--auto", "-a", help="Auto mode (default): translate everything the microphone hears.")] = False,
+    manual: Annotated[bool, typer.Option("--manual", "-m", help="Manual mode: keys start and skip each step (listen to them, your answer, ...).")] = False,
+    headphones: Annotated[bool, typer.Option("--headphones", help="Auto mode keeps listening while a translation is spoken (no echo with headphones).")] = False,
     input_device: InputOpt = None,
     output_device: OutputOpt = None,
+    config: ConfigOpt = None,
+    set_: SetOpt = None,
     verbose: VerboseOpt = False,
 ) -> None:
-    """[bold]Conversation app[/bold] (default): listen to Italian → English, answer in English → spoken Italian.
-
-    Keys: SPACE next step · E speak English · T type · V voices · H help · Q quit.
-    """
+    if ctx.invoked_subcommand is not None:
+        return
+    if auto and manual:
+        err_console.print("pick one: -a (auto mode) or -m (manual mode)")
+        raise typer.Exit(2)
     _setup_logging(verbose, quiet=True)
-    cfg = _config(config, set_, None, input_device, output_device)
+    cfg = _config(config, set_, None, input_device, output_device, ["audio.half_duplex=false"] if headphones else None)
     from .talk import run_talk
 
     if not sys.stdin.isatty():
-        err_console.print("talk needs an interactive terminal; use [bold]file[/bold] or [bold]text[/bold] instead.")
+        err_console.print("the conversation app needs an interactive terminal; use [bold]file[/bold] or [bold]text[/bold] instead.")
         raise typer.Exit(2)
     engine = _load_engine(cfg)
-    run_talk(engine, cfg, console)
+    run_talk(engine, cfg, console, mode="manual" if manual else "auto")
 
 
-@app.command()
-def live(
-    config: ConfigOpt = None,
-    set_: SetOpt = None,
-    mode: ModeOpt = None,
-    input_device: InputOpt = None,
-    output_device: OutputOpt = None,
-    headphones: Annotated[bool, typer.Option("--headphones", help="Full duplex: don't mute the mic while speaking.")] = False,
-    verbose: VerboseOpt = False,
-) -> None:
-    """Hands-free: translate everything the microphone hears, in both directions, until Ctrl+C."""
-    _setup_logging(verbose)
-    cfg = _config(config, set_, mode, input_device, output_device, ["audio.half_duplex=false"] if headphones else None)
-    from .pipeline import LiveSession
-
-    engine = _load_engine(cfg)
-    LiveSession(engine, cfg, printer=lambda m: console.print(m, markup=False)).run()
-
-
-@app.command("file")
+@app.command("file", rich_help_panel=TRANSLATE)
 def file_(
     input: Annotated[Path, typer.Argument(help="Recording to translate (wav, mp3, ogg/opus voice note, m4a, …).")],
     output: Annotated[Optional[Path], typer.Option("--output", "-o", help="Also write the spoken translation to this WAV (+ .jsonl).")] = None,
     play: Annotated[bool, typer.Option("--play", "-p", help="Play the spoken translation.")] = False,
     config: ConfigOpt = None,
     set_: SetOpt = None,
-    mode: ModeOpt = None,
+    direction: DirectionOpt = None,
     verbose: VerboseOpt = False,
 ) -> None:
     """Translate an audio file, e.g. an Italian voice message."""
     _setup_logging(verbose, quiet=True)
-    cfg = _config(config, set_, mode)
+    cfg = _config(config, set_, direction)
     if not input.is_file():
         err_console.print(f"[red]no such file:[/red] {input}")
         raise typer.Exit(2)
@@ -164,7 +152,7 @@ def file_(
         console.print("[yellow]no speech found[/yellow]")
 
 
-@app.command()
+@app.command(rich_help_panel=TRANSLATE)
 def text(
     words: Annotated[Optional[list[str]], typer.Argument(help="Text to translate (omit for an interactive prompt).")] = None,
     src: Annotated[Optional[str], typer.Option("--src", help="Source language (default: guessed).")] = None,
@@ -172,12 +160,12 @@ def text(
     output: Annotated[Optional[Path], typer.Option("--output", "-o", help="Write the spoken translation to this WAV.")] = None,
     config: ConfigOpt = None,
     set_: SetOpt = None,
-    mode: ModeOpt = None,
+    direction: DirectionOpt = None,
     verbose: VerboseOpt = False,
 ) -> None:
     """Translate typed text (the language is detected; use --src to force it)."""
     _setup_logging(verbose, quiet=True)
-    cfg = _config(config, set_, mode)
+    cfg = _config(config, set_, direction)
     from .audio import Player, write_wav
     from .pipeline import format_turn
 
@@ -204,7 +192,7 @@ def text(
             handle(line.strip())
 
 
-@app.command()
+@app.command(rich_help_panel=SETUP)
 def voices(
     use: Annotated[Optional[list[str]], typer.Option("--use", help="Make this voice the default for its language (saved), e.g. --use kokoro:im_nicola.")] = None,
     play: Annotated[bool, typer.Option("--play", "-p", help="Speak a sample with every listed voice.")] = False,
@@ -238,7 +226,7 @@ def voices(
         table.add_row("★" if current else "", v.id, v.lang, f"{v.name} ({v.detail})", v.engine,
                       style="bold" if current else None)
     console.print(table)
-    console.print("[dim]★ = in use. Change with [bold]--use ID[/bold], or press V in the talk app.[/dim]")
+    console.print("[dim]★ = in use. Change with [bold]--use ID[/bold], or press V in the app.[/dim]")
     if play:
         from .audio import Player
         from .talk import SAMPLE_SENTENCES
@@ -252,7 +240,7 @@ def voices(
             player.play(audio, sr)
 
 
-@app.command()
+@app.command(rich_help_panel=SETUP)
 def check(config: ConfigOpt = None, set_: SetOpt = None) -> None:
     """Verify the environment, CUDA libraries and model files (no models are loaded)."""
     _setup_logging(False, quiet=True)
@@ -263,7 +251,7 @@ def check(config: ConfigOpt = None, set_: SetOpt = None) -> None:
         raise typer.Exit(1)
 
 
-@app.command()
+@app.command(rich_help_panel=SETUP)
 def devices() -> None:
     """List audio input/output devices."""
     from .audio import list_devices
@@ -271,17 +259,17 @@ def devices() -> None:
     console.print(list_devices())
 
 
-@app.command()
+@app.command(rich_help_panel=SETUP)
 def selftest(
     out_dir: Annotated[Optional[Path], typer.Option("--out-dir", help="Where to write the WAVs (default: outputs/).")] = None,
     config: ConfigOpt = None,
     set_: SetOpt = None,
-    mode: ModeOpt = None,
+    direction: DirectionOpt = None,
     verbose: VerboseOpt = False,
 ) -> None:
     """End-to-end test without a microphone: a voice speaks a sentence, then it is translated."""
     _setup_logging(verbose)
-    cfg = _config(config, set_, mode)
+    cfg = _config(config, set_, direction)
     from .pipeline import selftest as run_selftest
 
     engine = _load_engine(cfg)
@@ -289,9 +277,45 @@ def selftest(
         raise typer.Exit(1)
 
 
-def main() -> None:
+@app.command(rich_help_panel=SETUP, context_settings={**PASSTHROUGH, "help_option_names": []})
+def setup(ctx: typer.Context) -> None:
+    """Create the Python environment and install the packages (first time, or to repair it). See [bold]setup --help[/bold]."""
+    from .install import main as setup_main
+
+    raise typer.Exit(setup_main(ctx.args))
+
+
+@app.command(rich_help_panel=SETUP)
+def download(
+    llm: Annotated[str, typer.Option("--llm", help="translategemma-q6 (default) | translategemma-q4 | translategemma-q8 | qwen3.5-4b | gemma4-e4b")] = "translategemma-q6",
+    asr: Annotated[Optional[str], typer.Option("--asr", help="Also get Whisper large-v3 (3.1 GB, optional; see to-download.md).")] = None,
+    only: Annotated[Optional[str], typer.Option("--only", help="Just one group: whisper | llm | voices | kokoro.")] = None,
+) -> None:
+    """Download the models into ./models (skips files that are already there; resumes broken downloads)."""
+    from .download import run_download
+
     try:
-        app(prog_name="myvoice")
+        ok = run_download(console, llm=llm, asr=asr, only=only)
+    except ValueError as e:
+        err_console.print(f"[red]{e}[/red]")
+        raise typer.Exit(2) from None
+    if not ok:
+        raise typer.Exit(1)
+
+
+@app.command(rich_help_panel=SETUP, context_settings=PASSTHROUGH)
+def test(ctx: typer.Context) -> None:
+    """Run the unit tests (fake models, no GPU needed); extra arguments go to pytest."""
+    import pytest
+
+    from .config import PROJECT_ROOT
+
+    raise typer.Exit(pytest.main(["-q", str(PROJECT_ROOT / "tests"), *ctx.args]))
+
+
+def main(argv: list[str] | None = None) -> None:
+    try:
+        app(args=argv, prog_name="./myvoice.py")
         code: object = 0
     except SystemExit as e:
         code = e.code

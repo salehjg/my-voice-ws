@@ -1,5 +1,5 @@
-# Core runtime (installed by scripts/setup_env.sh into the `myvoice` conda env).
-# torch is installed separately from the PyTorch CUDA index (see setup_env.sh); its
+# Core runtime (installed by `./myvoice.py setup` into the `myvoice` conda env).
+# torch is installed separately from the PyTorch CUDA index (see src/myvoice/install.py); its
 # nvidia-cublas-cu12 / nvidia-cudnn-cu12 wheels are what CTranslate2 and llama.cpp use.
 # llama-cpp-python is also installed separately (compiled for this machine).
 

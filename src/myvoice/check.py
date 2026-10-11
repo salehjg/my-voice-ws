@@ -69,7 +69,7 @@ def _ctranslate2() -> tuple[str, str]:
 
     n = ctranslate2.get_cuda_device_count()
     if n == 0:
-        return FAIL, f"ctranslate2 {ctranslate2.__version__} sees no CUDA device (cuBLAS/cuDNN not found? source env.sh)"
+        return FAIL, f"ctranslate2 {ctranslate2.__version__} sees no CUDA device (cuBLAS/cuDNN not found? start it with ./myvoice.py)"
     types = sorted(ctranslate2.get_supported_compute_types("cuda"))
     return OK, f"ctranslate2 {ctranslate2.__version__}, compute types: {', '.join(types)}"
 
@@ -88,7 +88,7 @@ def _llama_cpp() -> tuple[str, str]:
     code = "import llama_cpp; print(llama_cpp.__version__, llama_cpp.llama_supports_gpu_offload())"
     p = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=300)
     if p.returncode == -signal.SIGILL:
-        return FAIL, "llama-cpp-python crashed (illegal instruction): built for another CPU; run `bash scripts/setup_env.sh`"
+        return FAIL, "llama-cpp-python crashed (illegal instruction): built for another CPU; run `./myvoice.py setup`"
     if p.returncode != 0:
         last = (p.stderr.strip().splitlines() or ["no output"])[-1]
         return FAIL, f"llama-cpp-python failed to load (exit {p.returncode}): {last}"
@@ -122,7 +122,7 @@ def _voice(cfg: Config, voice_id: str) -> Callable[[], tuple[str, str]]:
             model, pack = cfg.path(cfg.tts.kokoro_model), cfg.path(cfg.tts.kokoro_voices)
             for f in (model, pack):
                 if not f.is_file():
-                    return FAIL, f"{voice_id}: missing {f} (run scripts/download_models.sh)"
+                    return FAIL, f"{voice_id}: missing {f} (run ./myvoice.py download)"
             with np.load(pack) as voices:
                 if voice_id[len(KOKORO_PREFIX):] not in voices.files:
                     return FAIL, f"{voice_id}: not in {pack.name}"
@@ -132,7 +132,7 @@ def _voice(cfg: Config, voice_id: str) -> Callable[[], tuple[str, str]]:
         except FileNotFoundError as e:
             return FAIL, str(e)
         if not onnx.is_file() or not Path(f"{onnx}.json").is_file():
-            return FAIL, f"{voice_id}: missing {onnx} or its .json (run scripts/download_models.sh)"
+            return FAIL, f"{voice_id}: missing {onnx} or its .json (run ./myvoice.py download)"
         return OK, f"{voice_id} (Piper, {onnx.stat().st_size / 2**20:.0f} MiB)"
 
     return check
@@ -172,10 +172,10 @@ def _file(path: Path, min_bytes: int = 1) -> Callable[[], tuple[str, str]]:
 def run_check(cfg: Config) -> bool:
     r = Report()
     r.add(OK, "python", f"{sys.version.split()[0]} on {platform.system()} ({sys.executable})")
-    if os.environ.get("MYVOICE_ENV_SOURCED") != "1":
-        r.add(WARN, "env.sh", "not sourced; use ./run.sh or `source env.sh` (it sources setvars.all.sh)")
+    if os.environ.get("MYVOICE_ENV_READY") != "1":
+        r.add(WARN, "environment", "not started through ./myvoice.py (which loads setvars.all.sh + the conda env)")
     else:
-        r.add(OK, "env.sh", "sourced")
+        r.add(OK, "environment", "setvars.all.sh + conda env loaded by ./myvoice.py")
     offline = os.environ.get("HF_HUB_OFFLINE") == "1"
     r.add(OK if offline else WARN, "offline mode", "HF_HUB_OFFLINE=1" if offline else "HF_HUB_OFFLINE is not 1")
 

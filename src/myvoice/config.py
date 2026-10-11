@@ -17,7 +17,7 @@ LOCAL_CONFIG_NAME = "config.local.toml"
 
 @dataclass
 class GeneralConfig:
-    mode: str = "auto"
+    direction: str = "auto"
     languages: list[str] = field(default_factory=lambda: ["it", "en"])
     session_log_dir: str = "outputs"
     warmup: bool = True
@@ -31,7 +31,6 @@ class AudioConfig:
     block_ms: int = 32
     half_duplex: bool = True
     playback_tail_ms: int = 300
-    max_wait_for_silence_s: float = 8.0
 
 
 @dataclass
@@ -80,7 +79,7 @@ class TtsConfig:
     kokoro_model: str = "models/kokoro/kokoro-v1.0.onnx"
     kokoro_voices: str = "models/kokoro/voices-v1.0.bin"
     voices: dict[str, str] = field(
-        default_factory=lambda: {"it": "kokoro:if_sara", "en": "kokoro:af_heart"}
+        default_factory=lambda: {"it": "kokoro:im_nicola", "en": "kokoro:am_michael"}
     )
 
 
@@ -92,6 +91,7 @@ class TalkConfig:
     confirm_my_speech: bool = True
     their_end_silence_ms: int = 1000
     my_end_silence_ms: int = 1500
+    auto_end_silence_ms: int = 1000
     no_speech_timeout_s: float = 15.0
     max_record_s: float = 60.0
 
@@ -210,14 +210,14 @@ def load_config(path: str | Path | None = None, overrides: Iterable[str] = (), l
 
 
 def validate(cfg: Config) -> None:
-    from .langs import get_language, parse_mode
+    from .langs import get_language, parse_direction
 
     langs = cfg.general.languages
     if len(langs) != 2 or langs[0] == langs[1]:
         raise ValueError(f"general.languages must name two different languages, got {langs}")
     for code in langs:
         get_language(code)
-    parse_mode(cfg.general.mode, langs)
+    parse_direction(cfg.general.direction, langs)
     if cfg.translation.backend not in ("llama_cpp", "transformers"):
         raise ValueError(f"translation.backend must be llama_cpp or transformers, got {cfg.translation.backend!r}")
     if cfg.translation.prompt_style not in ("translategemma", "chat"):

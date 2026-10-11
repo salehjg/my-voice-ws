@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from myvoice.config import DEFAULT_CONFIG_PATH, load_config, parse_override
-from myvoice.langs import guess_text_language, other_language, parse_mode
+from myvoice.langs import guess_text_language, other_language, parse_direction
 
 
 def test_default_config_file_loads_and_matches_dataclass_defaults():
@@ -17,11 +17,11 @@ def test_default_config_file_loads_and_matches_dataclass_defaults():
 
 def test_overrides_are_parsed_as_toml_values():
     cfg = load_config(overrides=["asr.beam_size=1", "asr.compute_type=int8_float16", "audio.half_duplex=false",
-                                 'general.mode="it-en"', "vad.threshold=0.6", "translation.n_ctx=4096"])
+                                 'general.direction="it-en"', "vad.threshold=0.6", "translation.n_ctx=4096"])
     assert cfg.asr.beam_size == 1
     assert cfg.asr.compute_type == "int8_float16"
     assert cfg.audio.half_duplex is False
-    assert cfg.general.mode == "it-en"
+    assert cfg.general.direction == "it-en"
     assert cfg.vad.threshold == 0.6
     assert parse_override("tts.voices.it=x.onnx") == {"tts": {"voices": {"it": "x.onnx"}}}
 
@@ -33,7 +33,7 @@ def test_int_is_accepted_for_float_fields():
 
 @pytest.mark.parametrize(
     "bad",
-    ["asr.nope=1", "nosection.key=1", "asr.beam_size=fast", "audio.half_duplex=1", 'general.mode="it-fr"',
+    ["asr.nope=1", "nosection.key=1", "asr.beam_size=fast", "audio.half_duplex=1", 'general.direction="it-fr"',
      'translation.backend="vllm"'],
 )
 def test_invalid_config_is_rejected(bad):
@@ -54,14 +54,14 @@ def test_model_ref_keeps_hf_repo_ids(tmp_path: Path):
     assert cfg.model_ref("models/llm/x.gguf").endswith("models/llm/x.gguf")
 
 
-def test_modes():
-    assert parse_mode("auto", ["it", "en"]) is None
+def test_directions():
+    assert parse_direction("auto", ["it", "en"]) is None
     for m in ("it-en", "it->en", "it2en", "IT-EN"):
-        assert parse_mode(m, ["it", "en"]) == ("it", "en")
-    assert parse_mode("en-it", ["it", "en"]) == ("en", "it")
+        assert parse_direction(m, ["it", "en"]) == ("it", "en")
+    assert parse_direction("en-it", ["it", "en"]) == ("en", "it")
     assert other_language("it", ["it", "en"]) == "en"
     with pytest.raises(ValueError):
-        parse_mode("it-fr", ["it", "en"])
+        parse_direction("it-fr", ["it", "en"])
 
 
 @pytest.mark.parametrize(

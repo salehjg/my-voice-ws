@@ -1,4 +1,4 @@
-"""``python -m myvoice`` (normally via ``./run.sh``); see cli.py."""
+"""``python -m myvoice`` (normally started by ``./myvoice.py``, which sets up the environment)."""
 
 from .cli import main
 

@@ -1,5 +1,10 @@
-"""Conversation mode: they speak (Italian), you read/hear it in English, you answer in English
-and it is spoken in Italian. Single keys drive the cycle; every step can be skipped.
+"""The conversation app, in two modes (TAB switches between them).
+
+Auto mode (default): the microphone is always on; every sentence is recognised as Italian or
+English, translated into the other language, shown and spoken.
+
+Manual mode: they speak (Italian), you read/hear it in English, you answer in English and it is
+spoken in Italian. Single keys drive the cycle; every step can be skipped.
 
     ready ──SPACE──► listen to them ─► translate ─► (speak to you) ─► your turn
       ▲                                                                   │ SPACE
@@ -28,16 +33,16 @@ from rich.text import Text
 
 from .audio import Player, concat_with_gaps, open_mic, read_audio
 from .config import Config, save_local
-from .langs import get_language
+from .langs import get_language, other_language
 from .pipeline import Engine, SessionLog, TurnResult
 from .vad import SAMPLE_RATE, Segmenter, make_vad
 
 log = logging.getLogger(__name__)
 
-THEIR_COLOR, MY_COLOR = "cyan", "green"
+THEIR_COLOR, MY_COLOR, AUTO_COLOR = "cyan", "green", "magenta"
 SENTENCE_END = re.compile(r"(?<=[.!?…])\s+(?=\S)")
 AGAIN = "\x00again"  # confirm(): record again
-KNOWN_KEYS = {"space", "enter", "e", "l", "t", "i", "f", "s", "esc", "r", "a", "c", "v", "h", "?", "q", "ctrl-d"}
+KNOWN_KEYS = {"space", "enter", "tab", "e", "l", "t", "i", "f", "s", "esc", "r", "a", "c", "v", "h", "?", "q", "ctrl-d"}
 
 SAMPLE_SENTENCES = {
     "it": "Ciao! Questa è la voce italiana. Come ti sembra?",
@@ -55,11 +60,13 @@ class Keys(Protocol):
 
 
 def decode_key(data: bytes) -> str | None:
-    """Raw terminal bytes -> key name: "space", "enter", "esc", "backspace", "up", or a character."""
+    """Raw terminal bytes -> key name: "space", "enter", "tab", "esc", "backspace", "up", or a character."""
     if not data:
         return None
     if data in (b"\r", b"\n", b"\r\n"):
         return "enter"
+    if data == b"\t":
+        return "tab"
     if data == b" ":
         return "space"
     if data == b"\x1b":
@@ -82,7 +89,7 @@ class TerminalKeys:
 
     def __init__(self) -> None:
         if not sys.stdin.isatty():
-            raise RuntimeError("the talk app needs an interactive terminal (try `file` or `text` instead)")
+            raise RuntimeError("the conversation app needs an interactive terminal (try `file` or `text` instead)")
         self.fd = sys.stdin.fileno()
         self._saved = None
 
@@ -277,6 +284,10 @@ class TalkApp:
         self.log = SessionLog(cfg, prefix="talk")
         self.last_audio: tuple[np.ndarray, int] | None = None
         self.history: list[TurnResult] = []
+        self.mode = "manual"
+        self.last_heard: tuple[np.ndarray, str] | None = None  # auto mode: (speech, language) for W
+        self._mic_on = False  # auto mode keeps the mic running between sentences
+        self._restart_mic = False  # ...and pauses it while it talks or a key action runs
 
     # -- output helpers
     def say(self, text: str | Text, style: str = "") -> None:
@@ -291,11 +302,11 @@ class TalkApp:
         voices = ""
         if tts is not None:
             voices = f"{self._voice_name(tts.voices[self.their])} / {self._voice_name(tts.voices[self.mine])}"
-        return Text.assemble(
-            (f"{self.my_name} audio ", "dim"), on(self.cfg.talk.speak_to_me),
-            ("   confirm my speech ", "dim"), on(self.cfg.talk.confirm_my_speech),
-            ("   voices ", "dim"), (voices, "bold"),
-        )
+        parts: list[tuple[str, str]] = [(f"{self.my_name} audio ", "dim"), on(self.cfg.talk.speak_to_me)]
+        if self.mode == "manual":
+            parts += [("   confirm my speech ", "dim"), on(self.cfg.talk.confirm_my_speech)]
+        parts += [("   voices ", "dim"), (voices, "bold")]
+        return Text.assemble(*parts)
 
     def _voice_name(self, voice_id: str) -> str:
         for v in self._voices_cache():
@@ -311,45 +322,79 @@ class TalkApp:
         return self._voices
 
     def banner(self) -> None:
-        title = f"myvoice · {self.their_name} ⇄ {self.my_name}"
+        pair = f"{self.their_name} ⇄ {self.my_name}"
+        if self.mode == "auto":
+            mic = ("headphones: always listening" if not self.cfg.audio.half_duplex
+                   else "the mic pauses while a translation is spoken")
+            body = Group(
+                Text(f"Just talk. {self.their_name} and {self.my_name} are recognised by themselves, "
+                     "translated into the other language and spoken."),
+                Text(f"Wait for ● Listening before the next sentence ({mic}).", style="dim"),
+                Text(),
+                _hint(("SPACE", "pause"), ("TAB", "manual mode"), ("H", "all keys"), ("Q", "quit")),
+                self.status_line(),
+            )
+            self.console.print(Panel(body, title=f"myvoice · auto mode · {pair}", title_align="left",
+                                     border_style=AUTO_COLOR))
+            return
         body = Group(
             Text(f"They speak {self.their_name}, you read/hear {self.my_name}; you answer in {self.my_name}, "
                  f"they hear {self.their_name}."),
             Text(),
-            _hint(("SPACE", "next step"), ("H", "all keys"), ("Q", "quit")),
+            _hint(("SPACE", "next step"), ("TAB", "auto mode"), ("H", "all keys"), ("Q", "quit")),
             self.status_line(),
         )
-        self.console.print(Panel(body, title=title, title_align="left", border_style="blue"))
+        self.console.print(Panel(body, title=f"myvoice · manual mode · {pair}", title_align="left",
+                                 border_style="blue"))
 
     def help(self) -> None:
+        if self.mode == "auto":
+            rows = [
+                ("SPACE", "pause / resume listening"),
+                ("TAB", "manual mode: you start and skip each step with keys"),
+                ("W", "wrong language? redo the last sentence as the other language"),
+                ("T", "type a sentence (either language)"),
+                ("R", "replay the last translation"),
+                ("A", f"{self.my_name} audio on/off (off = translations into {self.my_name} are only shown)"),
+                ("V", "change voices"),
+                ("Q", "quit"),
+            ]
+            footer = "While a voice is speaking: any key stops it."
+        else:
+            rows = [
+                ("SPACE", f"next step: listen to them → your answer → speak it in {self.their_name}"),
+                ("E", f"answer in {self.my_name} by voice (skip listening to them)"),
+                ("T", f"type in {self.my_name} (translated + spoken in {self.their_name})"),
+                ("I", f"type in {self.their_name} (translated into {self.my_name})"),
+                ("L", "listen to them (again)"),
+                ("F", "translate an audio file (voice message, recording)"),
+                ("R", "replay the last translation"),
+                ("A", f"{self.my_name} audio on/off (hear the translation, not only read it)"),
+                ("C", "confirm my speech on/off (check what was heard before translating)"),
+                ("V", "change voices"),
+                ("S / ESC", "skip / cancel the current step"),
+                ("TAB", "auto mode: translate everything the microphone hears"),
+                ("Q", "quit"),
+            ]
+            footer = "While recording: SPACE/ENTER = done, ESC = cancel. While speaking: any key = stop."
         t = Table(show_header=False, box=None, padding=(0, 2))
         t.add_column(style="bold reverse", justify="center")
         t.add_column()
-        rows = [
-            ("SPACE", f"next step: listen to them → your answer → speak it in {self.their_name}"),
-            ("E", f"answer in {self.my_name} by voice (skip listening to them)"),
-            ("T", f"type in {self.my_name} (translated + spoken in {self.their_name})"),
-            ("I", f"type in {self.their_name} (translated into {self.my_name})"),
-            ("L", "listen to them (again)"),
-            ("F", "translate an audio file (voice message, recording)"),
-            ("R", "replay the last translation"),
-            ("A", f"{self.my_name} audio on/off (hear the translation, not only read it)"),
-            ("C", "confirm my speech on/off (check what was heard before translating)"),
-            ("V", "change voices"),
-            ("S / ESC", "skip / cancel the current step"),
-            ("Q", "quit"),
-        ]
         for k, what in rows:
             t.add_row(k, what)
         t.add_row("", "")
-        t.add_row("", Text("While recording: SPACE/ENTER = done, ESC = cancel. While speaking: any key = stop.",
-                           style="dim"))
-        self.console.print(Panel(t, title="keys", title_align="left", border_style="blue"))
+        t.add_row("", Text(footer, style="dim"))
+        self.console.print(Panel(t, title=f"keys · {self.mode} mode", title_align="left", border_style="blue"))
 
     # -- audio
     @staticmethod
     def _playing_view(label: str) -> Text:
         return Text.assemble(("  🔊 ", ""), (label, "bold"), ("   any key = stop", "dim"))
+
+    def _before_sound(self) -> None:
+        """Auto mode with speakers: stop listening while we talk, or we'd translate ourselves."""
+        if self.mode == "auto" and self.cfg.audio.half_duplex:
+            self._pause_mic()
 
     def _wait_playing(self) -> bool:
         """Wait for the current sound to end; False if a key stopped it."""
@@ -364,6 +409,7 @@ class TalkApp:
         if audio.size == 0:
             return
         self.last_audio = (audio, sr)
+        self._before_sound()
         self.keys.flush()
         self.player.start(audio, sr)
         with Live(self._playing_view(label), console=self.console, transient=True, refresh_per_second=8):
@@ -376,12 +422,10 @@ class TalkApp:
         view = Text()
 
         def update(db: float, elapsed: float, speaking: bool) -> None:
-            n = int(max(0.0, min(1.0, (db + 60) / 50)) * 24)
             view.truncate(0)
             view.append(" ● ", style="bold red" if speaking else "red")
             view.append(f"Listening to {name}… ", style=f"bold {color}")
-            view.append("█" * n, style="green" if speaking else "grey50")
-            view.append("░" * (24 - n), style="grey23")
+            view.append_text(_level_bar(db, speaking))
             view.append(f" {elapsed:4.1f}s   ")
             view.append_text(_hint(("SPACE", "done"), ("ESC", "cancel")))
             live.update(view)
@@ -396,15 +440,20 @@ class TalkApp:
         return rec
 
     # -- turns
-    def show(self, r: TurnResult, who: str) -> None:
+    def show(self, r: TurnResult, who: str = "") -> None:
         theirs = r.src_lang == self.their
         color = THEIR_COLOR if theirs else MY_COLOR
         body = Group(
             Text(r.src_text, style="dim"),
             Text.assemble(("→ ", "bold"), (r.tgt_text, f"bold {color}")),
         )
-        title = f"{who} · {get_language(r.src_lang).name} → {get_language(r.tgt_lang).name}"
-        self.console.print(Panel(body, title=title, title_align="left", subtitle=_timings(r),
+        title = f"{get_language(r.src_lang).name} → {get_language(r.tgt_lang).name}"
+        if who:
+            title = f"{who} · {title}"
+        subtitle = _timings(r)
+        if r.lang_prob < 0.8:  # auto-detected and unsure: point at the fix
+            subtitle = f"{get_language(r.src_lang).name}? {r.lang_prob:.0%} sure, W = other language · {subtitle}"
+        self.console.print(Panel(body, title=title, title_align="left", subtitle=subtitle,
                                  subtitle_align="right", border_style=color))
         self.history.append(r)
         self.log.write(r)
@@ -433,6 +482,7 @@ class TalkApp:
         gap_s = self.cfg.tts.sentence_silence_ms / 1000
         with self.console.status("…", spinner="simpleDots"):
             clips = [tts.synthesize(parts[0], lang)]
+        self._before_sound()
         self.keys.flush()
         with Live(self._playing_view(label), console=self.console, transient=True, refresh_per_second=8):
             self.player.start(*clips[0])
@@ -619,14 +669,21 @@ class TalkApp:
         self.say(self.status_line())
 
     # -- main loop
-    def run(self) -> None:
+    def run(self, mode: str = "manual") -> None:
+        """Run until the user quits; TAB switches between "auto" and "manual" mode."""
+        while mode != "quit":
+            self.mode = mode
+            mode = self.run_auto() if mode == "auto" else self.run_manual()
+
+    def run_manual(self) -> str:
+        """Manual mode; returns "auto" (TAB) or "quit"."""
         self.banner()
         state, show_hint = "ready", True
-        while state != "quit":
+        while state not in ("quit", "auto"):
             if show_hint:
                 if state == "ready":
                     self.hint(("SPACE", f"listen to {self.their_name}"), ("E", f"speak {self.my_name}"),
-                              ("T", "type"), ("H", "help"), ("Q", "quit"))
+                              ("T", "type"), ("TAB", "auto mode"), ("H", "help"), ("Q", "quit"))
                 else:
                     self.say(Text.assemble(("Your turn ", f"bold {MY_COLOR}"),
                                            (f"— answer in {self.my_name}", MY_COLOR)))
@@ -642,11 +699,14 @@ class TalkApp:
                 log.debug("step failed", exc_info=True)
                 self.say(f"  something went wrong: {type(e).__name__}: {e}  (run with -v for details)", "red")
                 state = "ready"
+        return state
 
     def step(self, state: str, key: str | None) -> str:
         """Handle one key in ``state`` ("ready" | "reply"); returns the next state."""
         if key in ("q", "ctrl-d"):
             return "quit"
+        if key == "tab":
+            return "auto"
         if key in ("space", "enter"):
             return self.their_turn() if state == "ready" else self.my_turn()
         actions: dict[str, Callable[[], str]] = {
@@ -672,14 +732,165 @@ class TalkApp:
             self.help()
         return state
 
+    # -- auto mode
+    def _start_mic(self) -> None:
+        if not self._mic_on:
+            while not self.mic.blocks.empty():  # stale audio from before the pause
+                self.mic.blocks.get_nowait()
+            self.mic.start()
+            self._mic_on = True
 
-def run_talk(engine: Engine, cfg: Config, console: Console) -> None:
+    def _stop_mic(self) -> None:
+        if self._mic_on:
+            self.mic.stop()
+            self._mic_on = False
+
+    def _pause_mic(self) -> None:
+        """Stop listening until the current action is over (see run_auto)."""
+        if self._mic_on:
+            self._stop_mic()
+            self._restart_mic = True
+
+    def listen(self, segmenter: Segmenter) -> tuple[str, object]:
+        """Feed the microphone to the voice detector until a sentence is complete
+        (``("speech", audio)``) or a key is pressed (``("key", name)``)."""
+        pair = f"{self.their_name} ⇄ {self.my_name}"
+        keys = _hint(("SPACE", "pause"), ("TAB", "manual"), ("R", "replay"), ("H", "help"), ("Q", "quit"))
+        speech_s = 0.0
+
+        def view(db: float, speaking: bool) -> Text:
+            t = Text()
+            t.append(" ● ", style="bold red" if speaking else "red")
+            t.append(f"hearing… {speech_s:4.1f}s " if speaking else f"Listening · {pair} ", style=f"bold {AUTO_COLOR}")
+            t.append_text(_level_bar(db, speaking))
+            t.append("   ")
+            t.append_text(keys)
+            return t
+
+        with Live(view(-90.0, False), console=self.console, transient=True, refresh_per_second=15) as live:
+            while True:
+                key = self.keys.get(timeout=0)
+                if key is not None:
+                    return "key", key
+                try:
+                    block = self.mic.blocks.get(timeout=0.05)
+                except queue.Empty:
+                    continue
+                utts = segmenter.feed(block)
+                if utts:
+                    return "speech", utts[0].audio
+                speech_s = speech_s + block.size / SAMPLE_RATE if segmenter.in_speech else 0.0
+                live.update(view(level_db(block), segmenter.in_speech))
+
+    def _speak_result(self, r: TurnResult) -> None:
+        if r.tgt_lang == self.mine and not self.cfg.talk.speak_to_me:
+            return
+        self.speak(r.tgt_text, r.tgt_lang, f"speaking {get_language(r.tgt_lang).name}")
+
+    def auto_turn(self, audio: np.ndarray) -> None:
+        """One sentence heard in auto mode: detect its language, translate, show, speak."""
+        with self.console.status("Translating…"):
+            r = self.engine.process_audio(audio, speak=False)
+        if r is None or not r.tgt_text:
+            log.debug("nothing recognised in %.1fs of audio", audio.size / SAMPLE_RATE)
+            return  # a cough, a door: stay quiet
+        self.last_heard = (audio, r.src_lang)
+        self.show(r)
+        self._speak_result(r)
+
+    def redo_other_language(self) -> None:
+        if self.last_heard is None:
+            self.say("  nothing to redo yet", "dim")
+            return
+        audio, lang = self.last_heard
+        other = other_language(lang, self.engine.languages)
+        name = get_language(other).name
+        with self.console.status(f"Again, as {name}…"):
+            r = self.engine.process_audio(audio, speak=False, src=other)
+        if r is None or not r.tgt_text:
+            self.say(f"  no {name} words recognised in it", "yellow")
+            return
+        self.last_heard = (audio, other)
+        self.show(r, "Redone")
+        self._speak_result(r)
+
+    def type_any(self) -> None:
+        text = self.keys.line_input("  type (either language)> ")
+        if not text or not text.strip():
+            return
+        with self.console.status("Translating…"):
+            r = self.engine.process_text(text.strip(), speak=False)  # language guessed from the words
+        self.show(r, "Typed")
+        self._speak_result(r)
+
+    def run_auto(self) -> str:
+        """Auto mode; returns "manual" (TAB) or "quit"."""
+        vad_cfg = dataclasses.replace(self.cfg.vad, min_silence_ms=self.cfg.talk.auto_end_silence_ms)
+        segmenter = Segmenter(make_vad(vad_cfg), vad_cfg)
+        actions: dict[str, Callable[[], None]] = {
+            "w": self.redo_other_language,
+            "t": self.type_any,
+            "r": self.replay,
+            "a": lambda: self.toggle("speak_to_me", f"{self.my_name} audio"),
+            "v": self.voices_menu,
+            "h": self.help,
+            "?": self.help,
+        }
+        self.banner()
+        paused = False
+        self._start_mic()
+        try:
+            while True:
+                if paused:
+                    self.say(Text.assemble(("  ⏸ Paused  ", "bold yellow"),
+                                           _hint(("SPACE", "listen again"), ("TAB", "manual mode"), ("Q", "quit"))))
+                    kind, value = "key", self.keys.get()
+                else:
+                    kind, value = self.listen(segmenter)
+                try:
+                    if kind == "speech":
+                        self.auto_turn(value)
+                    elif value in ("q", "ctrl-d"):
+                        return "quit"
+                    elif value == "tab":
+                        return "manual"
+                    elif value == "space":
+                        paused = not paused
+                        if paused:
+                            self._stop_mic()
+                        else:
+                            self._start_mic()
+                            segmenter.reset()
+                    elif value in actions:
+                        self._pause_mic()  # typing, menus and replays aren't conversation
+                        actions[value]()
+                except Exception as e:  # noqa: BLE001 - keep the conversation going
+                    log.debug("auto turn failed", exc_info=True)
+                    self.say(f"  something went wrong: {type(e).__name__}: {e}  (run with -v for details)", "red")
+                if self._restart_mic:
+                    self._restart_mic = False
+                    if not paused:
+                        time.sleep(self.cfg.audio.playback_tail_ms / 1000)  # let the room echo die down
+                        self._start_mic()
+                        segmenter.reset()
+        finally:
+            self._stop_mic()
+            self._restart_mic = False
+
+
+def _level_bar(db: float, speaking: bool, width: int = 24) -> Text:
+    n = int(max(0.0, min(1.0, (db + 60) / 50)) * width)
+    return Text.assemble(("█" * n, "green" if speaking else "grey50"), ("░" * (width - n), "grey23"))
+
+
+def run_talk(engine: Engine, cfg: Config, console: Console, mode: str = "auto") -> None:
     with TerminalKeys() as keys:
         app = TalkApp(engine, cfg, keys, console=console)
         try:
-            app.run()
+            app.run(mode)
         except KeyboardInterrupt:
             pass
         finally:
             app.player.stop()
+            app._stop_mic()
     console.print("bye 👋")
