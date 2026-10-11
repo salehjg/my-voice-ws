@@ -1,0 +1,6 @@
+# Optional: only needed for translation.backend = "transformers" (HF safetensors checkpoints).
+transformers>=4.57
+accelerate>=1.0
+bitsandbytes>=0.45
+sentencepiece
+protobuf

@@ -1,0 +1,69 @@
+# myvoice: offline Italian <-> English speech translator.
+#
+# Relative paths are resolved against the directory containing this file.
+# Any value can be overridden on the command line, e.g.
+#   ./run.sh live --set asr.compute_type=int8_float16 --set general.mode=it-en
+
+[general]
+# "auto"  : detect Italian/English per utterance and translate into the other one
+# "it-en" : always Italian -> English (skips language detection)
+# "en-it" : always English -> Italian
+mode = "auto"
+languages = ["it", "en"]        # the language pair (first is the "home" language)
+session_log_dir = "outputs"     # one JSONL transcript per live session; "" disables it
+warmup = true                   # run one dummy pass at start-up so the first utterance is fast
+
+[audio]
+input_device = ""               # device index or name substring ("" = system default); see `./run.sh devices`
+output_device = ""
+sample_rate = 16000             # rate fed to VAD/ASR (mic is resampled if it cannot capture at 16 kHz)
+block_ms = 32
+# With speakers the microphone hears the translation; half-duplex mutes the mic while
+# the translation is playing. Set to false when using headphones.
+half_duplex = true
+playback_tail_ms = 300          # keep the mic muted a little after playback (room echo)
+max_wait_for_silence_s = 8.0    # wait for the speaker to pause before playing a translation
+
+[vad]
+backend = "silero"              # "silero" (bundled with the silero-vad pip package) | "energy"
+threshold = 0.5                 # speech probability needed to start/continue speech
+min_speech_ms = 250             # shorter blips are ignored
+min_silence_ms = 700            # this much silence ends an utterance (lower = snappier, but may cut sentences)
+pre_roll_ms = 300               # audio kept from before speech onset
+max_utterance_s = 25.0          # force a cut on very long monologues
+energy_threshold_db = -42.0     # only used by the "energy" backend
+
+[asr]
+model = "models/whisper/faster-whisper-large-v3-turbo"
+device = "cuda"
+compute_type = "float16"        # "int8_float16" saves ~0.7 GB VRAM at a small accuracy cost
+beam_size = 5
+initial_prompt = ""             # optional vocabulary/style hint (names, jargon)
+filter_hallucinations = true    # drop Whisper's classic phantom phrases ("Sottotitoli a cura di ...")
+
+[translation]
+backend = "llama_cpp"           # "llama_cpp" (GGUF, recommended) | "transformers" (HF safetensors)
+model = "models/llm/translategemma-4b-it.Q6_K.gguf"
+# "translategemma": Google's official TranslateGemma prompt (use with TranslateGemma models)
+# "chat"          : interpreter system prompt via the model's chat template (Qwen, Gemma 4, Llama, ...)
+prompt_style = "translategemma"
+n_gpu_layers = -1               # -1 = whole model on GPU
+n_ctx = 2048
+flash_attn = true
+max_new_tokens = 384
+temperature = 0.0               # greedy decoding: deterministic, best for translation
+context_turns = 2               # "chat" style only: previous exchanges passed as context
+# transformers backend only:
+load_in_4bit = true             # bitsandbytes NF4; needed for >=4B models on 8 GB
+dtype = "bfloat16"
+
+[tts]
+backend = "piper"
+use_cuda = false                # Piper is faster than real time on CPU; true needs onnxruntime-gpu
+length_scale = 1.0              # >1 = slower speech
+volume = 1.0
+sentence_silence_ms = 150
+
+[tts.voices]
+it = "models/piper/it/it_IT/paola/medium/it_IT-paola-medium.onnx"
+en = "models/piper/en/en_US/lessac/high/en_US-lessac-high.onnx"

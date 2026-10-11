@@ -1,0 +1,26 @@
+# Downloaded model weights (scripts/download_models.sh), incl. partial *.part files
+models/
+
+# Runtime output: session transcripts, selftest WAVs
+outputs/
+*.wav
+!tests/data/*.wav
+
+# Local build artifacts: patched CUDA toolkit shadow (scripts/patch_cuda_glibc.sh)
+build/
+*.log
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Editors, OS, local tool settings
+.vscode/
+.idea/
+*.swp
+.DS_Store
+.claude/settings.local.json
