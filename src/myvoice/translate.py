@@ -14,8 +14,10 @@ Prompt styles:
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
+import os
 import re
 from abc import ABC, abstractmethod
 from collections import deque
@@ -228,10 +230,27 @@ class Translator(ABC):
         return out
 
 
+@contextlib.contextmanager
+def quiet_native_stderr():
+    """Silence C-level stderr (llama.cpp/ggml load messages) unless debug logging is on."""
+    if log.isEnabledFor(logging.DEBUG):
+        yield
+        return
+    saved = os.dup(2)
+    try:
+        with open(os.devnull, "wb") as devnull:
+            os.dup2(devnull.fileno(), 2)
+        yield
+    finally:
+        os.dup2(saved, 2)
+        os.close(saved)
+
+
 class LlamaCppTranslator(Translator):
     def __init__(self, cfg: TranslationConfig, model_path: str | Path) -> None:
         super().__init__(cfg)
-        from llama_cpp import Llama
+        with quiet_native_stderr():
+            from llama_cpp import Llama
 
         path = Path(model_path)
         if not path.is_file():
@@ -244,7 +263,8 @@ class LlamaCppTranslator(Translator):
         }
         if cfg.flash_attn:
             kwargs["flash_attn"] = True
-        self.llm = Llama(**kwargs)
+        with quiet_native_stderr():
+            self.llm = Llama(**kwargs)
         self.template: str | None = (self.llm.metadata or {}).get("tokenizer.chat_template")
         self._bos = self.llm.token_bos()
 

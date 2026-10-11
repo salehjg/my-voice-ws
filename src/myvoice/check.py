@@ -41,6 +41,12 @@ class Report:
         return fails == 0
 
 
+def _dist_version(dist: str) -> str:
+    import importlib.metadata
+
+    return importlib.metadata.version(dist)
+
+
 def _version(mod: str) -> tuple[str, str]:
     m = importlib.import_module(mod)
     return OK, str(getattr(m, "__version__", "installed"))
@@ -99,6 +105,39 @@ def _piper() -> tuple[str, str]:
     return OK, f"piper ok, onnxruntime {onnxruntime.__version__} providers: {', '.join(onnxruntime.get_available_providers())}"
 
 
+def _kokoro() -> tuple[str, str]:
+    import importlib.metadata
+
+    importlib.import_module("kokoro_onnx")
+    return OK, f"kokoro-onnx {importlib.metadata.version('kokoro-onnx')}"
+
+
+def _voice(cfg: Config, voice_id: str) -> Callable[[], tuple[str, str]]:
+    def check() -> tuple[str, str]:
+        from .tts import KOKORO_PREFIX, resolve_piper
+
+        if voice_id.startswith(KOKORO_PREFIX):
+            import numpy as np
+
+            model, pack = cfg.path(cfg.tts.kokoro_model), cfg.path(cfg.tts.kokoro_voices)
+            for f in (model, pack):
+                if not f.is_file():
+                    return FAIL, f"{voice_id}: missing {f} (run scripts/download_models.sh)"
+            with np.load(pack) as voices:
+                if voice_id[len(KOKORO_PREFIX):] not in voices.files:
+                    return FAIL, f"{voice_id}: not in {pack.name}"
+            return OK, f"{voice_id} (Kokoro, {model.stat().st_size / 2**20:.0f} MiB model)"
+        try:
+            onnx = resolve_piper(cfg, voice_id)
+        except FileNotFoundError as e:
+            return FAIL, str(e)
+        if not onnx.is_file() or not Path(f"{onnx}.json").is_file():
+            return FAIL, f"{voice_id}: missing {onnx} or its .json (run scripts/download_models.sh)"
+        return OK, f"{voice_id} (Piper, {onnx.stat().st_size / 2**20:.0f} MiB)"
+
+    return check
+
+
 def _silero() -> tuple[str, str]:
     from silero_vad import load_silero_vad
 
@@ -152,6 +191,9 @@ def run_check(cfg: Config) -> bool:
         if cfg.translation.load_in_4bit:
             r.guard("bitsandbytes", lambda: _version("bitsandbytes"))
     r.guard("piper-tts", _piper)
+    uses_kokoro = any(v.startswith("kokoro:") for v in cfg.tts.voices.values())
+    r.guard("kokoro-onnx", _kokoro, fail_status=FAIL if uses_kokoro else WARN)
+    r.guard("rich + typer (UI)", lambda: (OK, f"rich {_dist_version('rich')}, typer {_dist_version('typer')}"))
     if cfg.vad.backend == "silero":
         r.guard("silero-vad", _silero)
     r.guard("jinja2", lambda: _version("jinja2"))
@@ -167,7 +209,5 @@ def run_check(cfg: Config) -> bool:
         else:
             r.add(OK, "model: LLM (HF cache)", f"{ref} (resolved from the Hugging Face cache at load time)")
     for lang in cfg.general.languages:
-        voice = cfg.path(cfg.tts.voices[lang])
-        r.guard(f"voice: {lang}", _file(voice, 1 * 2**20))
-        r.guard(f"voice: {lang} (.json)", _file(Path(f"{voice}.json")))
+        r.guard(f"voice: {lang}", _voice(cfg, cfg.tts.voices[lang]))
     return r.print()

@@ -15,15 +15,15 @@ from typing import TYPE_CHECKING, Callable
 
 import numpy as np
 
-from .audio import MicStream, Player, concat_with_gaps, read_audio, resample, write_wav
+from .audio import Player, concat_with_gaps, open_mic, read_audio, resample, write_wav
 from .config import Config
 from .langs import guess_text_language, other_language, parse_mode
 from .vad import SAMPLE_RATE, Segmenter, Utterance, make_vad
 
 if TYPE_CHECKING:
-    from .asr import WhisperAsr
+    from .asr import Transcript, WhisperAsr
     from .translate import Translator
-    from .tts import PiperTts
+    from .tts import Tts
 
 log = logging.getLogger(__name__)
 
@@ -74,7 +74,7 @@ def format_turn(r: TurnResult) -> str:
 class Engine:
     """Holds the loaded models and runs one turn (utterance or text) through them."""
 
-    def __init__(self, cfg: Config, asr: WhisperAsr | None, mt: Translator, tts: PiperTts | None) -> None:
+    def __init__(self, cfg: Config, asr: WhisperAsr | None, mt: Translator, tts: Tts | None) -> None:
         self.cfg = cfg
         self.asr = asr
         self.mt = mt
@@ -125,6 +125,13 @@ class Engine:
         assert detected is not None
         return detected, other_language(detected, self.languages)
 
+    def transcribe(self, audio: np.ndarray, lang: str | None = None) -> Transcript | None:
+        """Speech -> text, in ``lang`` if given (no language detection), else detected."""
+        assert self.asr is not None, "engine was loaded without ASR"
+        if lang is None and self.fixed:
+            lang = self.fixed[0]
+        return self.asr.transcribe(audio, self.languages, forced_language=lang)
+
     def _finish(self, r: TurnResult, speak: bool) -> TurnResult:
         if not r.tgt_text:
             return r
@@ -135,18 +142,22 @@ class Engine:
             r.timings["tts"] = time.perf_counter() - t0
         return r
 
-    def process_audio(self, audio: np.ndarray, speak: bool = True) -> TurnResult | None:
-        """One utterance (float32 mono 16 kHz) -> transcript, translation and speech."""
-        assert self.asr is not None, "engine was loaded without ASR"
+    def process_audio(self, audio: np.ndarray, speak: bool = True, src: str | None = None) -> TurnResult | None:
+        """One utterance (float32 mono 16 kHz) -> transcript, translation and speech.
+
+        ``src`` fixes the spoken language (no detection); otherwise the mode decides.
+        """
         timings: dict[str, float] = {}
         t0 = time.perf_counter()
-        forced = self.fixed[0] if self.fixed else None
-        tr = self.asr.transcribe(audio, self.languages, forced_language=forced)
+        tr = self.transcribe(audio, src)
         timings["asr"] = time.perf_counter() - t0
         if tr is None:
             log.debug("no speech recognised in %.1fs utterance", audio.size / SAMPLE_RATE)
             return None
-        src, tgt = self._directions(tr.language)
+        if src is not None:
+            src, tgt = src, other_language(src, self.languages)
+        else:
+            src, tgt = self._directions(tr.language)
         t0 = time.perf_counter()
         translation = self.mt.translate(tr.text, src, tgt)
         timings["mt"] = time.perf_counter() - t0
@@ -154,7 +165,8 @@ class Engine:
         return self._finish(r, speak)
 
     def process_text(self, text: str, src: str | None = None, speak: bool = True) -> TurnResult:
-        if self.fixed:
+        """Text -> translation (+ speech). An explicit ``src`` wins over the mode."""
+        if src is None and self.fixed:
             src, tgt = self.fixed
         else:
             src = src or guess_text_language(text, self.languages)
@@ -209,7 +221,7 @@ class LiveSession:
         self.cfg = cfg
         self.print = printer
         self.segmenter = Segmenter(make_vad(cfg.vad), cfg.vad)
-        self.mic = MicStream(cfg.audio.sample_rate, cfg.audio.block_ms, cfg.audio.input_device)
+        self.mic = open_mic(cfg.audio.sample_rate, cfg.audio.block_ms, cfg.audio.input_device)
         self.player = Player(cfg.audio.output_device)
         self.gate = MicGate()
         self.log = SessionLog(cfg)
@@ -305,8 +317,11 @@ class LiveSession:
                 log.warning("%d audio blocks dropped (input overflow)", self.mic.overflows)
 
 
-def translate_file(engine: Engine, cfg: Config, in_path: Path, out_path: Path | None) -> list[TurnResult]:
-    """Offline: segment a recording with the VAD, translate every utterance, write one WAV."""
+def translate_file(
+    engine: Engine, cfg: Config, in_path: Path, out_path: Path | None, speak: bool = False,
+    printer: Callable[[str], None] = print,
+) -> list[TurnResult]:
+    """Offline: segment a recording with the VAD, translate every utterance, optionally write one WAV."""
     audio = read_audio(in_path, SAMPLE_RATE)
     seg = Segmenter(make_vad(cfg.vad), cfg.vad)
     utts = seg.feed(audio)
@@ -316,10 +331,10 @@ def translate_file(engine: Engine, cfg: Config, in_path: Path, out_path: Path | 
     log.info("%s: %.1fs audio, %d utterances", in_path.name, audio.size / SAMPLE_RATE, len(utts))
     results: list[TurnResult] = []
     for utt in utts:
-        r = engine.process_audio(utt.audio, speak=out_path is not None)
+        r = engine.process_audio(utt.audio, speak=speak or out_path is not None)
         if r is None:
             continue
-        print(f"[{utt.start_s:7.2f}s]" + format_turn(r))
+        printer(f"[{utt.start_s:7.2f}s]" + format_turn(r))
         results.append(r)
     if out_path is not None:
         track, sr = concat_with_gaps([(r.audio, r.sample_rate) for r in results])
@@ -327,7 +342,7 @@ def translate_file(engine: Engine, cfg: Config, in_path: Path, out_path: Path | 
         with open(out_path.with_suffix(".jsonl"), "w", encoding="utf-8") as f:
             for r in results:
                 f.write(json.dumps(r.to_json(), ensure_ascii=False) + "\n")
-        print(f"\nwrote {out_path} and {out_path.with_suffix('.jsonl')}")
+        printer(f"\nwrote {out_path} and {out_path.with_suffix('.jsonl')}")
     return results
 
 

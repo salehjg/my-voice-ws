@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import json
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -10,6 +11,8 @@ from typing import Any, Iterable
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config.toml"
+# Personal choices saved by the app (voice menu, toggles); next to config.toml, overrides it.
+LOCAL_CONFIG_NAME = "config.local.toml"
 
 
 @dataclass
@@ -69,17 +72,28 @@ class TranslationConfig:
 
 @dataclass
 class TtsConfig:
-    backend: str = "piper"
     use_cuda: bool = False
     length_scale: float = 1.0
     volume: float = 1.0
     sentence_silence_ms: int = 150
+    piper_dir: str = "models/piper"
+    kokoro_model: str = "models/kokoro/kokoro-v1.0.onnx"
+    kokoro_voices: str = "models/kokoro/voices-v1.0.bin"
     voices: dict[str, str] = field(
-        default_factory=lambda: {
-            "it": "models/piper/it/it_IT/paola/medium/it_IT-paola-medium.onnx",
-            "en": "models/piper/en/en_US/lessac/high/en_US-lessac-high.onnx",
-        }
+        default_factory=lambda: {"it": "kokoro:if_sara", "en": "kokoro:af_heart"}
     )
+
+
+@dataclass
+class TalkConfig:
+    their_language: str = "it"
+    my_language: str = "en"
+    speak_to_me: bool = True
+    confirm_my_speech: bool = True
+    their_end_silence_ms: int = 1000
+    my_end_silence_ms: int = 1500
+    no_speech_timeout_s: float = 15.0
+    max_record_s: float = 60.0
 
 
 @dataclass
@@ -90,6 +104,7 @@ class Config:
     asr: AsrConfig = field(default_factory=AsrConfig)
     translation: TranslationConfig = field(default_factory=TranslationConfig)
     tts: TtsConfig = field(default_factory=TtsConfig)
+    talk: TalkConfig = field(default_factory=TalkConfig)
     root: Path = PROJECT_ROOT
 
     def path(self, value: str) -> Path:
@@ -171,7 +186,8 @@ def parse_override(item: str) -> dict[str, Any]:
     return out
 
 
-def load_config(path: str | Path | None = None, overrides: Iterable[str] = ()) -> Config:
+def load_config(path: str | Path | None = None, overrides: Iterable[str] = (), local: bool = False) -> Config:
+    """Defaults <- config.toml <- config.local.toml (if ``local``) <- ``--set`` overrides."""
     cfg = Config()
     cfg_path = Path(path) if path else DEFAULT_CONFIG_PATH
     if cfg_path.exists():
@@ -180,6 +196,13 @@ def load_config(path: str | Path | None = None, overrides: Iterable[str] = ()) -
         cfg.root = cfg_path.resolve().parent
     elif path:
         raise FileNotFoundError(f"config file not found: {cfg_path}")
+    local_path = cfg.root / LOCAL_CONFIG_NAME
+    if local and local_path.exists():
+        try:
+            with open(local_path, "rb") as f:
+                _apply(cfg, tomllib.load(f))
+        except (ValueError, tomllib.TOMLDecodeError) as e:
+            raise ValueError(f"{local_path}: {e} (delete the file to reset your saved choices)") from e
     for item in overrides:
         _apply(cfg, parse_override(item))
     validate(cfg)
@@ -201,8 +224,52 @@ def validate(cfg: Config) -> None:
         raise ValueError(f"translation.prompt_style must be translategemma or chat, got {cfg.translation.prompt_style!r}")
     if cfg.vad.backend not in ("silero", "energy"):
         raise ValueError(f"vad.backend must be silero or energy, got {cfg.vad.backend!r}")
-    if cfg.tts.backend != "piper":
-        raise ValueError(f"tts.backend must be piper, got {cfg.tts.backend!r}")
     missing = [code for code in langs if code not in cfg.tts.voices]
     if missing:
         raise ValueError(f"tts.voices has no voice for: {', '.join(missing)}")
+    talk = cfg.talk
+    if {talk.their_language, talk.my_language} != set(langs):
+        raise ValueError(
+            f"talk.their_language/my_language must be the two languages {langs}, "
+            f"got {talk.their_language!r}/{talk.my_language!r}"
+        )
+
+
+def _toml_value(v: Any) -> str:
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, (int, float)):
+        return repr(v)
+    if isinstance(v, str):
+        return json.dumps(v, ensure_ascii=False)  # JSON string escapes are valid TOML
+    if isinstance(v, list):
+        return "[" + ", ".join(_toml_value(x) for x in v) + "]"
+    raise TypeError(f"cannot write {v!r} to TOML")
+
+
+def save_local(cfg: Config, updates: dict[str, dict[str, Any]]) -> Path:
+    """Merge ``{"section": {"key": value}}`` into config.local.toml and into ``cfg``."""
+    path = cfg.root / LOCAL_CONFIG_NAME
+    data: dict[str, Any] = tomllib.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    for section, values in updates.items():
+        node = data.setdefault(section, {})
+        for key, value in values.items():
+            if isinstance(value, dict):
+                node.setdefault(key, {}).update(value)
+            else:
+                node[key] = value
+    _apply(cfg, updates)
+    lines = ["# Your saved choices (voice menu, toggles). Overrides config.toml; delete this file to reset.", ""]
+    for section, values in data.items():
+        scalars = {k: v for k, v in values.items() if not isinstance(v, dict)}
+        if scalars:
+            lines.append(f"[{section}]")
+            lines += [f"{k} = {_toml_value(v)}" for k, v in scalars.items()]
+            lines.append("")
+        for key, table in values.items():
+            if isinstance(table, dict):
+                lines.append(f"[{section}.{key}]")
+                lines += [f"{k} = {_toml_value(v)}" for k, v in table.items()]
+                lines.append("")
+    path.write_text("\n".join(lines), encoding="utf-8")
+    return path

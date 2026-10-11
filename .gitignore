@@ -1,6 +1,9 @@
 # Downloaded model weights (scripts/download_models.sh), incl. partial *.part files
 models/
 
+# Personal choices saved by the app (voice menu, toggles)
+config.local.toml
+
 # Runtime output: session transcripts, selftest WAVs
 outputs/
 *.wav

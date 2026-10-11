@@ -1,7 +1,7 @@
 # Core runtime (installed by scripts/setup_env.sh into the `myvoice` conda env).
 # torch is installed separately from the PyTorch CUDA index (see setup_env.sh); its
 # nvidia-cublas-cu12 / nvidia-cudnn-cu12 wheels are what CTranslate2 and llama.cpp use.
-# llama-cpp-python is also installed separately (prebuilt CUDA wheel).
+# llama-cpp-python is also installed separately (compiled for this machine).
 
 numpy>=1.26,<3
 scipy>=1.11
@@ -11,5 +11,8 @@ piper-tts==1.8.0
 silero-vad==6.2.3
 sounddevice==0.5.6
 jinja2>=3.1
-huggingface_hub>=1.0          # provides the `hf download` CLI used in to-download.md
+huggingface_hub>=1.0          # `hf` CLI for manual/gated downloads
+rich>=14                     # terminal UI
+typer>=0.20                  # command line interface
+kokoro-onnx==0.6.1           # optional second TTS engine (more voices)
 pytest>=8

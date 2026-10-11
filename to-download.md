@@ -1,12 +1,14 @@
-# to-download.md: everything that still has to be downloaded
+# to-download.md: what has to be downloaded, and how
 
-Nothing has been downloaded yet, neither Python packages nor model weights. There are two steps,
-both needing internet. After that, the translator runs fully offline.
+Two steps need internet: the Python environment, then the model files. After that, the translator
+runs fully offline. **On this laptop both are done** (Oct 2026); this file is for a fresh setup or a
+rebuild. Both scripts can be re-run at any time: packages and files that are already there are
+skipped.
 
 | Step | What | Size | Command |
 |---|---|---|---|
-| 1 | Python env `myvoice` (torch + CUDA libs, faster-whisper, llama.cpp, Piper, …) | ~5 GB | `bash scripts/setup_env.sh` |
-| 2 | Model weights into `./models` (Whisper, TranslateGemma, two Piper voices) | ~4.9 GB | `bash scripts/download_models.sh` |
+| 1 | Python env `myvoice` (torch + CUDA libs, faster-whisper, llama.cpp, Piper, Kokoro, …) | ~5 GB | `bash scripts/setup_env.sh` |
+| 2 | Model weights into `./models` (Whisper, TranslateGemma, 7 Piper voices, Kokoro) | ~5.8 GB | `bash scripts/download_models.sh` |
 | 3 | Verify (offline) | none | `./run.sh check && ./run.sh selftest` |
 
 > **Disk:** the root partition had only about 43 GB free (96 % used) when this was written. Budget
@@ -75,29 +77,42 @@ packages are skipped.
 
 ---
 
-## Step 2: Models (~4.9 GB with the defaults)
+## Step 2: Models (~5.8 GB)
 
 ```bash
-bash scripts/download_models.sh                     # defaults below
-bash scripts/download_models.sh --llm translategemma-q4   # smaller LLM instead (see alternatives)
-bash scripts/download_models.sh --extra-voices      # + 4 more voices
-bash scripts/download_models.sh --only voices       # just one group: whisper | llm | voices
+bash scripts/download_models.sh                       # everything below
+bash scripts/download_models.sh --only voices         # just one group: whisper | llm | voices | kokoro
+bash scripts/download_models.sh --llm translategemma-q4   # a different LLM (see alternatives)
+bash scripts/download_models.sh --asr large-v3        # + optional Whisper large-v3 (3.1 GB, see below)
 ```
 
 The script downloads over plain HTTPS with `curl` and can be resumed. If the connection drops, it
 retries from where it stopped. If it gives up or you press Ctrl+C, run the same command again: the
-partial file (`*.part`) is continued and finished files are skipped. Each file is checked against
-the size and sha256 published on the Hub before it is moved into place.
+partial file (`*.part`) is continued and **finished files are skipped** (a re-run with everything
+present takes a second and downloads nothing). Each file is checked against its size and sha256
+before it is moved into place.
 
 ### Default set
 
-| Role | Model | Hugging Face repo | File(s) | Size | License |
+| Role | Model | Source | File(s) | Size | License |
 |---|---|---|---|---|---|
-| Speech recognition | Whisper large-v3-turbo, CTranslate2 fp16 | [`mobiuslabsgmbh/faster-whisper-large-v3-turbo`](https://huggingface.co/mobiuslabsgmbh/faster-whisper-large-v3-turbo) | whole repo (`model.bin`, `config.json`, `tokenizer.json`, `vocabulary.json`, `preprocessor_config.json`) | 1.62 GB | MIT |
+| Speech recognition | Whisper large-v3-turbo, CTranslate2 fp16 | [`mobiuslabsgmbh/faster-whisper-large-v3-turbo`](https://huggingface.co/mobiuslabsgmbh/faster-whisper-large-v3-turbo) | `model.bin`, `config.json`, `tokenizer.json`, `vocabulary.json`, `preprocessor_config.json` | 1.62 GB | MIT |
 | Translation (LLM) | Google TranslateGemma 4B, GGUF Q6_K | [`mradermacher/translategemma-4b-it-GGUF`](https://huggingface.co/mradermacher/translategemma-4b-it-GGUF) | `translategemma-4b-it.Q6_K.gguf` | 3.19 GB | Gemma Terms of Use |
-| Italian voice | Piper `it_IT-paola-medium` | [`rhasspy/piper-voices`](https://huggingface.co/rhasspy/piper-voices) | `it/it_IT/paola/medium/it_IT-paola-medium.onnx` + `.onnx.json` | 64 MB | see the voice's `MODEL_CARD` |
-| English voice | Piper `en_US-lessac-high` | `rhasspy/piper-voices` | `en/en_US/lessac/high/en_US-lessac-high.onnx` + `.onnx.json` | 114 MB | see the voice's `MODEL_CARD` |
+| Voices (default) | Kokoro-82M, ONNX | [`thewh1teagle/kokoro-onnx` release `model-files-v1.1`](https://github.com/thewh1teagle/kokoro-onnx/releases/tag/model-files-v1.1) | `kokoro-v1.0.onnx`, `voices-v1.0.bin` | 354 MB | Apache-2.0 |
+| Voices (light) | 7 Piper voices (see below) | [`rhasspy/piper-voices`](https://huggingface.co/rhasspy/piper-voices) | `.onnx` + `.onnx.json` each | 618 MB | see each voice's `MODEL_CARD` |
 | VAD | Silero VAD | (inside the `silero-vad` pip wheel) | none | none | MIT |
+
+Piper voices in the default set (path in `rhasspy/piper-voices`):
+
+| Voice | Path | Size |
+|---|---|---|
+| Italian, female (Paola) | `it/it_IT/paola/medium/it_IT-paola-medium.onnx` | 64 MB |
+| Italian, female (Serena) | `it/it_IT/serena/high/it_IT-serena-high.onnx` | 114 MB |
+| Italian, male (Riccardo, low quality) | `it/it_IT/riccardo/x_low/it_IT-riccardo-x_low.onnx` | 28 MB |
+| US English, female (Lessac) | `en/en_US/lessac/high/en_US-lessac-high.onnx` | 114 MB |
+| US English, male (Ryan) | `en/en_US/ryan/high/en_US-ryan-high.onnx` | 121 MB |
+| British English, female (Cori) | `en/en_GB/cori/high/en_GB-cori-high.onnx` | 114 MB |
+| British English, male (Alan) | `en/en_GB/alan/medium/en_GB-alan-medium.onnx` | 63 MB |
 
 Equivalent manual commands (from the project root). `HF_HUB_DISABLE_XET=1` makes `hf` use plain
 HTTP. Its default Xet transfer can abort on a slow or unstable line with
@@ -108,44 +123,45 @@ source env.sh && export HF_HUB_OFFLINE=0 HF_HUB_DISABLE_XET=1   # env.sh enables
 
 hf download mobiuslabsgmbh/faster-whisper-large-v3-turbo \
     --local-dir models/whisper/faster-whisper-large-v3-turbo
-
-hf download mradermacher/translategemma-4b-it-GGUF translategemma-4b-it.Q6_K.gguf \
-    --local-dir models/llm
-
+hf download mradermacher/translategemma-4b-it-GGUF translategemma-4b-it.Q6_K.gguf --local-dir models/llm
 hf download rhasspy/piper-voices \
-    it/it_IT/paola/medium/it_IT-paola-medium.onnx  it/it_IT/paola/medium/it_IT-paola-medium.onnx.json \
-    en/en_US/lessac/high/en_US-lessac-high.onnx    en/en_US/lessac/high/en_US-lessac-high.onnx.json \
-    --local-dir models/piper
+    it/it_IT/paola/medium/it_IT-paola-medium.onnx it/it_IT/paola/medium/it_IT-paola-medium.onnx.json \
+    --local-dir models/piper          # ...and the same for the other voices in the table
 
-# or any single file with curl (-C - resumes a partial download):
-curl -L -C - -o models/llm/translategemma-4b-it.Q6_K.gguf \
-    https://huggingface.co/mradermacher/translategemma-4b-it-GGUF/resolve/main/translategemma-4b-it.Q6_K.gguf
+# Kokoro (GitHub release); -C - resumes a partial download
+curl -L -C - -o models/kokoro/kokoro-v1.0.onnx \
+    https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/kokoro-v1.0.onnx
+curl -L -C - -o models/kokoro/voices-v1.0.bin \
+    https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/voices-v1.0.bin
 ```
 
-Resulting layout. These are exactly the paths `config.toml` points to:
+Resulting layout (the paths `config.toml` uses):
 
 ```
 models/
 ├── whisper/faster-whisper-large-v3-turbo/{model.bin,config.json,tokenizer.json,vocabulary.json,preprocessor_config.json}
 ├── llm/translategemma-4b-it.Q6_K.gguf
-└── piper/
-    ├── it/it_IT/paola/medium/it_IT-paola-medium.onnx(.json)
-    └── en/en_US/lessac/high/en_US-lessac-high.onnx(.json)
+├── kokoro/{kokoro-v1.0.onnx,voices-v1.0.bin}
+└── piper/{it,en}/<locale>/<name>/<quality>/<voice>.onnx(.json)
 ```
 
-Exact sizes in bytes, to check that a download is complete (`ls -l`):
+Exact sizes in bytes / sha256, to check a download by hand (`ls -l`, `sha256sum`):
 `model.bin` 1617884929 · `translategemma-4b-it.Q6_K.gguf` 3190755840 ·
-`it_IT-paola-medium.onnx` 63511038 · `en_US-lessac-high.onnx` 113895201.
+`kokoro-v1.0.onnx` 325505369 (`beb0d184…f0df3a`) · `voices-v1.0.bin` 28214398 (`bca610b8…f1fbf7d`).
 
 Why these:
 
 - **Whisper large-v3-turbo**: near large-v3 accuracy for Italian and English at a fraction of the
-  decode cost (4 decoder layers). Its language ID is what makes the "automatic" direction work.
-- **TranslateGemma 4B**: Google's translation-tuned Gemma 3 (Jan 2026). The technical report has
-  explicit English→Italian results, where it clearly beats plain Gemma 3 4B. Q6_K is close to full
-  quality and leaves VRAM for Whisper. The GGUF is a community conversion, because the original
+  decode cost (4 decoder layers).
+- **TranslateGemma 4B**: Google's translation-tuned Gemma 3 (Jan 2026). One model translates both
+  ways (Italian→English and English→Italian). Its technical report has explicit English→Italian
+  results, where it clearly beats plain Gemma 3 4B. Q6_K is close to full quality and leaves VRAM
+  for Whisper. The GGUF is a community conversion, because the original
   `google/translategemma-4b-it` repo is gated. The Gemma Terms of Use still apply.
-- **Piper**: real-time on CPU, so the GPU is left for ASR + LLM. It is small and fully offline.
+- **Kokoro + Piper**: both run on the CPU, leaving the GPU for Whisper + the LLM. In a round-trip
+  test (voice speaks → Whisper transcribes → compare), Kokoro was the most intelligible in Italian.
+  Piper voices are lighter and faster. Kokoro also has many more English voices
+  (`./run.sh voices --all`).
 
 ### Alternatives (optional)
 
@@ -178,22 +194,12 @@ hf download google/translategemma-4b-it --local-dir models/llm/translategemma-4b
 # run with: --set translation.backend=transformers --set translation.model=models/llm/translategemma-4b-it
 ```
 
-**ASR.** For maximum accuracy use `Systran/faster-whisper-large-v3` (~3.1 GB fp16, slower, about
-1.5 GB more VRAM, so pair it with `translategemma-q4` or `compute_type=int8_float16`):
-`hf download Systran/faster-whisper-large-v3 --local-dir models/whisper/faster-whisper-large-v3`,
-then set `asr.model`.
-
-**Voices** (`--extra-voices`). Switch with `[tts.voices]` in `config.toml`. All are in
-`rhasspy/piper-voices`:
-
-| Voice | Path in repo | Size |
-|---|---|---|
-| Italian, female, high | `it/it_IT/serena/high/it_IT-serena-high.onnx` | 114 MB |
-| Italian, male, x_low | `it/it_IT/riccardo/x_low/it_IT-riccardo-x_low.onnx` | 28 MB |
-| US English, male, high | `en/en_US/ryan/high/en_US-ryan-high.onnx` | 121 MB |
-| British English, female, high | `en/en_GB/cori/high/en_GB-cori-high.onnx` | 114 MB |
-
-(Each needs its `.onnx.json` too; the script fetches both.)
+**ASR: Whisper large-v3** (`--asr large-v3`, `Systran/faster-whisper-large-v3`, 3.1 GB). Downloaded
+on this laptop, but **not used by default**. On 192 accented-English test sentences (24 non-native
+speakers, background noise) it scored 4.3–4.5 % word errors against turbo's 4.6 %, while being
+50–60 % slower. To try it anyway:
+`./run.sh talk --set asr.model=models/whisper/faster-whisper-large-v3 --set asr.compute_type=int8_float16`.
+To free the space: `rm -rf models/whisper/faster-whisper-large-v3`.
 
 ---
 
@@ -201,13 +207,14 @@ then set `asr.model`.
 
 ```bash
 ./run.sh check        # packages, CUDA libs, model files: all lines should be ok
-./run.sh selftest     # Piper speaks an IT and an EN sentence -> Whisper -> LLM -> Piper; prints timings + VRAM
-./run.sh live         # the real thing (headphones recommended: add --headphones)
+./run.sh selftest     # a voice speaks an IT and an EN sentence -> Whisper -> LLM -> voice; prints timings + VRAM
+./run.sh              # the conversation app (see README)
 ```
 
 ## Runtime is offline
 
 `env.sh` (used by `run.sh`) sets `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1`. Every model is
 then loaded from a local path (`local_files_only=True` for Whisper and transformers; plain file
-paths for GGUF and Piper), and the Silero VAD comes from inside its wheel. Nothing is fetched
+paths for GGUF, Piper and Kokoro), the Silero VAD comes from inside its wheel, and Kokoro's
+phonemizer (espeak-ng) is bundled with its pip package. Nothing is fetched
 while translating, so you can unplug the network after steps 1–2.

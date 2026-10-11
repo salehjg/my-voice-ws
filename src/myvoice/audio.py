@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 import queue
+import threading
+import time
 import wave
 from pathlib import Path
 
@@ -215,17 +217,86 @@ class MicStream:
             self._stream = None
 
 
+class FileMic:
+    """Feeds sound files into the pipeline as if they came from the microphone.
+
+    Selected with ``audio.input_device = "file:a.wav,b.ogg"``: each ``start()`` plays the next
+    file (cycling), in real time, followed by silence. Used for testing and demos.
+    """
+
+    def __init__(self, paths: list[Path], sample_rate: int = 16000, block_ms: int = 32, realtime: bool = True) -> None:
+        if not paths:
+            raise ValueError("file: microphone needs at least one file")
+        self.paths = paths
+        self.sample_rate = sample_rate
+        self.block = int(sample_rate * block_ms / 1000)
+        self.realtime = realtime
+        self.blocks: queue.Queue[np.ndarray] = queue.Queue()
+        self.overflows = 0
+        self._next = 0
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def _run(self, audio: np.ndarray) -> None:
+        silence = np.zeros(self.block, dtype=np.float32)
+        pos = 0
+        while not self._stop.is_set():
+            chunk = audio[pos : pos + self.block] if pos < audio.size else silence
+            if chunk.size < self.block:
+                chunk = np.concatenate([chunk, silence[: self.block - chunk.size]])
+            pos += self.block
+            self.blocks.put(chunk)
+            if self.realtime:
+                time.sleep(self.block / self.sample_rate)
+            elif pos > audio.size + 5 * self.sample_rate:  # don't flood the queue with silence
+                time.sleep(0.01)
+
+    def start(self) -> None:
+        audio = read_audio(self.paths[self._next % len(self.paths)], self.sample_rate)
+        self._next += 1
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._run, args=(audio,), name="file-mic", daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=1)
+            self._thread = None
+        while not self.blocks.empty():
+            self.blocks.get_nowait()
+
+
+def open_mic(sample_rate: int, block_ms: int, device: str) -> MicStream | FileMic:
+    """A microphone stream, or a :class:`FileMic` for ``device = "file:a.wav,b.wav"``."""
+    if device.startswith("file:"):
+        paths = [Path(p).expanduser() for p in device[len("file:") :].split(",") if p.strip()]
+        return FileMic(paths, sample_rate, block_ms)
+    return MicStream(sample_rate, block_ms, device)
+
+
 class Player:
-    """Blocking playback on the chosen output device."""
+    """Playback on the chosen output device: blocking (``play``) or in the background (``start``)."""
 
     def __init__(self, device: str = "") -> None:
         self.device = find_device(device, "output")
 
+    def start(self, audio: np.ndarray, sample_rate: int) -> None:
+        if audio.size == 0:
+            return
+        _sd().play(audio.astype(np.float32, copy=False), samplerate=sample_rate, device=self.device)
+
+    def is_playing(self) -> bool:
+        try:
+            return bool(_sd().get_stream().active)
+        except RuntimeError:  # nothing played yet
+            return False
+
     def play(self, audio: np.ndarray, sample_rate: int) -> None:
         if audio.size == 0:
             return
-        sd = _sd()
-        sd.play(audio.astype(np.float32, copy=False), samplerate=sample_rate, device=self.device, blocking=True)
+        self.start(audio, sample_rate)
+        _sd().wait()
 
     def stop(self) -> None:
         try:

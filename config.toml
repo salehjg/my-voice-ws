@@ -3,6 +3,8 @@
 # Relative paths are resolved against the directory containing this file.
 # Any value can be overridden on the command line, e.g.
 #   ./run.sh live --set asr.compute_type=int8_float16 --set general.mode=it-en
+# Choices you make inside the app (voices, on/off toggles) are saved to config.local.toml,
+# which overrides this file. Delete config.local.toml to go back to these defaults.
 
 [general]
 # "auto"  : detect Italian/English per utterance and translate into the other one
@@ -12,6 +14,17 @@ mode = "auto"
 languages = ["it", "en"]        # the language pair (first is the "home" language)
 session_log_dir = "outputs"     # one JSONL transcript per live session; "" disables it
 warmup = true                   # run one dummy pass at start-up so the first utterance is fast
+
+[talk]
+# The conversation app (`./run.sh`, i.e. `./run.sh talk`): they speak their language, you answer in yours.
+their_language = "it"
+my_language = "en"
+speak_to_me = true              # also read the translation of what they said aloud (key A toggles)
+confirm_my_speech = true        # show what was heard from you and wait for Enter before translating (key C toggles)
+their_end_silence_ms = 1000     # this much silence ends their turn
+my_end_silence_ms = 1500        # ...and yours (longer, so thinking pauses don't cut you off)
+no_speech_timeout_s = 15.0      # stop listening if nobody starts talking
+max_record_s = 60.0             # longest single recording
 
 [audio]
 input_device = ""               # device index or name substring ("" = system default); see `./run.sh devices`
@@ -58,12 +71,19 @@ load_in_4bit = true             # bitsandbytes NF4; needed for >=4B models on 8 
 dtype = "bfloat16"
 
 [tts]
-backend = "piper"
+# A voice is a Piper voice name (e.g. "it_IT-paola-medium", found under piper_dir) or a Kokoro
+# voice "kokoro:<name>" (e.g. "kokoro:im_nicola"). `./run.sh voices` lists the installed ones;
+# key V in the app switches voices and remembers the choice.
 use_cuda = false                # Piper is faster than real time on CPU; true needs onnxruntime-gpu
-length_scale = 1.0              # >1 = slower speech
+length_scale = 1.0              # >1 = slower speech (both engines)
 volume = 1.0
-sentence_silence_ms = 150
+sentence_silence_ms = 150       # pause between sentences
+piper_dir = "models/piper"
+kokoro_model = "models/kokoro/kokoro-v1.0.onnx"
+kokoro_voices = "models/kokoro/voices-v1.0.bin"
 
 [tts.voices]
-it = "models/piper/it/it_IT/paola/medium/it_IT-paola-medium.onnx"
-en = "models/piper/en/en_US/lessac/high/en_US-lessac-high.onnx"
+# Kokoro voices were the most intelligible in a Whisper round-trip test (see README); the Piper
+# voices (e.g. "it_IT-paola-medium", "en_US-ryan-high") are lighter and work without Kokoro.
+it = "kokoro:if_sara"
+en = "kokoro:af_heart"
