@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.MyVoice" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/auto</item>
+    </style>
+</resources>

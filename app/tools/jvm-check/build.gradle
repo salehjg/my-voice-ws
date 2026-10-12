@@ -1,0 +1,37 @@
+plugins {
+    id 'java'
+}
+
+compileJava.options.release = 17
+compileTestJava.options.release = 17
+
+// The app's Android-free classes, compiled as they are
+sourceSets.main.java {
+    srcDir '../../myvoice/src/main/java'
+    include 'org/myvoice/mt/UnigramTokenizer.java', 'org/myvoice/mt/MarianTranslator.java', 'org/myvoice/mt/Translator.java',
+            'org/myvoice/mt/OutputCleaner.java', 'org/myvoice/mt/Prompts.java',
+            'org/myvoice/core/MiniJson.java', 'org/myvoice/core/Json.java',
+            'org/myvoice/accel/OrtSessions.java', 'org/myvoice/accel/Backend.java',
+            'org/myvoice/lang/**', 'org/myvoice/vad/**', 'org/myvoice/models/Downloader.java',
+            'org/myvoice/audio/Wav.java', 'org/myvoice/audio/AudioClip.java',
+            'org/myvoice/tts/Tts.java', 'org/myvoice/tts/PiperTts.java', 'org/myvoice/tts/EspeakPhonemizer.java',
+            'org/myvoice/nativebridge/NativeLib.java'
+}
+
+dependencies {
+    implementation 'com.microsoft.onnxruntime:onnxruntime:1.31.0'
+    testImplementation 'junit:junit:4.13.2'
+}
+
+test {
+    // folders with downloaded models; tests that need a missing one are skipped
+    systemProperty 'opus.dir', System.getenv('MYVOICE_OPUS_DIR') ?: ''
+    systemProperty 'golden', System.getenv('MYVOICE_GOLDEN') ?: ''
+    systemProperty 'silero', file('../../myvoice/src/main/assets/silero_vad.onnx').path
+    systemProperty 'clip.it', file('../../myvoice/src/main/assets/probe_it.wav').path
+    testLogging {
+        events 'passed', 'skipped', 'failed'
+        showStandardStreams = true
+        exceptionFormat = 'full'
+    }
+}

@@ -35,3 +35,10 @@ __pycache__/
 *.swp
 .DS_Store
 .claude/settings.local.json
+
+# Android app (app/): Gradle and native build output, local SDK path, built packages
+.gradle/
+.cxx/
+local.properties
+*.apk
+*.aab

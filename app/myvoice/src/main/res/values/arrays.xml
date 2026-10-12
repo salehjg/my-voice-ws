@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string-array name="mode_names"><item>Auto (translate everything)</item><item>Manual (buttons for each step)</item></string-array>
+    <string-array name="mode_values"><item>auto</item><item>manual</item></string-array>
+    <string-array name="silence_names"><item>0.7 s</item><item>1 s</item><item>1.5 s</item><item>2 s</item><item>2.5 s</item></string-array>
+    <string-array name="silence_values"><item>700</item><item>1000</item><item>1500</item><item>2000</item><item>2500</item></string-array>
+    <string-array name="listening_names"><item>Automatic (headphones: keep listening)</item><item>Speaker: pause the mic while speaking</item><item>Headphones: always listen</item></string-array>
+    <string-array name="listening_values"><item>auto</item><item>speakers</item><item>headphones</item></string-array>
+    <string-array name="vad_names"><item>0.4 (quiet room, soft voices)</item><item>0.5 (default)</item><item>0.6 (some noise)</item><item>0.7 (noisy)</item></string-array>
+    <string-array name="vad_values"><item>0.4</item><item>0.5</item><item>0.6</item><item>0.7</item></string-array>
+    <string-array name="direction_names"><item>Detect (Italian ⇄ English)</item><item>Always Italian → English</item><item>Always English → Italian</item></string-array>
+    <string-array name="direction_values"><item>auto</item><item>it-en</item><item>en-it</item></string-array>
+    <string-array name="accel_names"><item>Automatic (fastest that works)</item><item>CPU only</item><item>Vulkan GPU</item><item>OpenCL GPU</item><item>NNAPI (GPU/NPU)</item><item>Qualcomm NPU (QNN)</item><item>XNNPACK (fast CPU)</item></string-array>
+    <string-array name="accel_values"><item>auto</item><item>cpu</item><item>VULKAN</item><item>OPENCL</item><item>NNAPI</item><item>QNN</item><item>XNNPACK</item></string-array>
+</resources>

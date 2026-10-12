@@ -1,0 +1,9 @@
+// Plain-JVM checks of the app's Java code with real models on this laptop (ONNX Runtime for desktop
+// instead of the Android package): Opus-MT translation, Silero VAD, the downloader.
+// Run from app/: ./gradlew -p tools/jvm-check test   (model folders: see build.gradle)
+rootProject.name = "myvoice-jvm-check"
+dependencyResolutionManagement {
+    repositories {
+        mavenCentral()
+    }
+}

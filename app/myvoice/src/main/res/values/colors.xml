@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Italian side (them) and English side (me), like the laptop's cyan/green panels -->
+    <color name="their">#00838F</color>
+    <color name="mine">#2E7D32</color>
+    <color name="auto">#8E24AA</color>
+    <color name="warn">#E65100</color>
+    <color name="error">#C62828</color>
+</resources>

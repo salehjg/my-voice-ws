@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:app="http://schemas.android.com/apk/res-auto">
+    <PreferenceCategory app:title="Conversation">
+        <ListPreference app:key="start_mode" app:title="Start in" app:defaultValue="auto"
+            app:entries="@array/mode_names" app:entryValues="@array/mode_values" app:useSimpleSummaryProvider="true" />
+        <SwitchPreferenceCompat app:key="speak_to_me" app:title="English audio" app:defaultValue="true"
+            app:summary="Also speak translations into English (off: only show them)" />
+        <SwitchPreferenceCompat app:key="confirm_my_speech" app:title="Check my speech (manual mode)" app:defaultValue="true"
+            app:summary="Show what was heard from you before translating it" />
+        <ListPreference app:key="auto_end_silence_ms" app:title="Pause that ends a sentence (auto mode)" app:defaultValue="1000"
+            app:entries="@array/silence_names" app:entryValues="@array/silence_values" app:useSimpleSummaryProvider="true" />
+        <ListPreference app:key="their_end_silence_ms" app:title="Pause that ends their turn (manual)" app:defaultValue="1000"
+            app:entries="@array/silence_names" app:entryValues="@array/silence_values" app:useSimpleSummaryProvider="true" />
+        <ListPreference app:key="my_end_silence_ms" app:title="Pause that ends my turn (manual)" app:defaultValue="1500"
+            app:entries="@array/silence_names" app:entryValues="@array/silence_values" app:useSimpleSummaryProvider="true" />
+        <ListPreference app:key="direction" app:title="Translation direction" app:defaultValue="auto"
+            app:entries="@array/direction_names" app:entryValues="@array/direction_values" app:useSimpleSummaryProvider="true" />
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="Voices">
+        <ListPreference app:key="voice_it" app:title="Italian voice" app:useSimpleSummaryProvider="true" />
+        <ListPreference app:key="voice_en" app:title="English voice" app:useSimpleSummaryProvider="true" />
+        <Preference app:key="play_samples" app:title="Play samples" app:summary="Hear both voices" />
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="Listening">
+        <ListPreference app:key="listening" app:title="Speaker or headphones" app:defaultValue="auto"
+            app:entries="@array/listening_names" app:entryValues="@array/listening_values" app:useSimpleSummaryProvider="true" />
+        <ListPreference app:key="vad_threshold" app:title="Voice detection threshold" app:defaultValue="0.5"
+            app:entries="@array/vad_names" app:entryValues="@array/vad_values" app:useSimpleSummaryProvider="true" />
+        <EditTextPreference app:key="initial_prompt" app:title="Names and words it gets wrong"
+            app:summary="e.g. Saleh, Bologna, codice fiscale" />
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="Models and speed">
+        <Preference app:key="models" app:title="Models" app:summary="Choose and download models" />
+        <Preference app:key="acceleration_report" app:title="Acceleration" app:summary="What runs on the CPU, GPU or NPU, and why" />
+        <ListPreference app:key="accel_asr" app:title="Speech recognition runs on" app:defaultValue="auto"
+            app:entries="@array/accel_names" app:entryValues="@array/accel_values" app:useSimpleSummaryProvider="true" />
+        <ListPreference app:key="accel_mt" app:title="Translation runs on" app:defaultValue="auto"
+            app:entries="@array/accel_names" app:entryValues="@array/accel_values" app:useSimpleSummaryProvider="true" />
+        <ListPreference app:key="accel_tts" app:title="Piper voices run on" app:defaultValue="auto"
+            app:entries="@array/accel_names" app:entryValues="@array/accel_values" app:useSimpleSummaryProvider="true" />
+        <SwitchPreferenceCompat app:key="short_audio_ctx" app:title="Faster speech recognition for short sentences"
+            app:defaultValue="true" app:summary="Shrinks Whisper's 30 s window to the sentence (about 3x faster)" />
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="Other">
+        <SwitchPreferenceCompat app:key="session_log" app:title="Keep a transcript" app:defaultValue="true"
+            app:summary="One file per conversation in Android/data/org.myvoice/files/sessions" />
+        <SwitchPreferenceCompat app:key="wifi_only" app:title="Download models over Wi-Fi only" app:defaultValue="false" />
+        <SwitchPreferenceCompat app:key="test_audio_input" app:title="Test audio input (developer)" app:defaultValue="false"
+            app:summary="Use .wav files from Android/data/org.myvoice/files/test_audio instead of the microphone" />
+        <Preference app:key="exit" app:title="Exit" app:summary="Stop listening and close the app" />
+    </PreferenceCategory>
+</PreferenceScreen>

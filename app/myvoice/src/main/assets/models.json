@@ -1,0 +1,289 @@
+{
+ "version": 1,
+ "models": [
+  {
+   "id": "whisper-large-v3-turbo-q5_0",
+   "component": "asr",
+   "engine": "whisper",
+   "name": "Whisper large-v3-turbo",
+   "note": "the laptop's speech model (5-bit); most accurate, slow on small phones",
+   "ram_mb": 900,
+   "files": [
+    {
+     "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin",
+     "path": "whisper/ggml-large-v3-turbo-q5_0.bin",
+     "size": 574041195,
+     "sha256": "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2"
+    }
+   ],
+   "g15_s": 43.6,
+   "g15_measured": true
+  },
+  {
+   "id": "whisper-small-q8_0",
+   "component": "asr",
+   "engine": "whisper",
+   "name": "Whisper small",
+   "note": "good accuracy, a few times faster than turbo",
+   "ram_mb": 450,
+   "files": [
+    {
+     "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q8_0.bin",
+     "path": "whisper/ggml-small-q8_0.bin",
+     "size": 264464607,
+     "sha256": "49c8fb02b65e6049d5fa6c04f81f53b867b5ec9540406812c643f177317f779f"
+    }
+   ],
+   "g15_s": 4.9,
+   "g15_measured": true
+  },
+  {
+   "id": "whisper-base-q8_0",
+   "component": "asr",
+   "engine": "whisper",
+   "name": "Whisper base",
+   "note": "fastest; more mistakes with accents and noise",
+   "ram_mb": 200,
+   "files": [
+    {
+     "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base-q8_0.bin",
+     "path": "whisper/ggml-base-q8_0.bin",
+     "size": 81768585,
+     "sha256": "c577b9a86e7e048a0b7eada054f4dd79a56bbfa911fbdacf900ac5b567cbb7d9"
+    }
+   ],
+   "g15_s": 1.5,
+   "g15_measured": true
+  },
+  {
+   "id": "translategemma-4b-q6_k",
+   "component": "mt",
+   "engine": "llama",
+   "style": "translategemma",
+   "name": "TranslateGemma 4B (Q6_K)",
+   "note": "exactly the laptop's translation model; best quality, slow on small phones",
+   "ram_mb": 3600,
+   "files": [
+    {
+     "url": "https://huggingface.co/mradermacher/translategemma-4b-it-GGUF/resolve/main/translategemma-4b-it.Q6_K.gguf",
+     "path": "llm/translategemma-4b-it.Q6_K.gguf",
+     "size": 3190755840,
+     "sha256": "9848d1c4c61020511d278e1a82d460f198d3214e19d74344ef09446cdc3cb544"
+    }
+   ],
+   "g15_s": 39.0,
+   "g15_measured": true
+  },
+  {
+   "id": "translategemma-4b-q4_k_m",
+   "component": "mt",
+   "engine": "llama",
+   "style": "translategemma",
+   "name": "TranslateGemma 4B (Q4_K_M)",
+   "note": "same model, smaller and a bit faster, slightly lower quality",
+   "ram_mb": 2900,
+   "files": [
+    {
+     "url": "https://huggingface.co/mradermacher/translategemma-4b-it-GGUF/resolve/main/translategemma-4b-it.Q4_K_M.gguf",
+     "path": "llm/translategemma-4b-it.Q4_K_M.gguf",
+     "size": 2489909760,
+     "sha256": "81200d03e843d2ec1ece6eeafe7d13cb6e5211e1fcd336ade55790b683a08330"
+    }
+   ],
+   "g15_s": 32.0,
+   "g15_measured": false
+  },
+  {
+   "id": "gemma-3-1b-q4_0",
+   "component": "mt",
+   "engine": "llama",
+   "style": "chat",
+   "name": "Gemma 3 1B",
+   "note": "small general LLM; noticeably weaker translations",
+   "ram_mb": 1000,
+   "files": [
+    {
+     "url": "https://huggingface.co/unsloth/gemma-3-1b-it-GGUF/resolve/main/gemma-3-1b-it-Q4_0.gguf",
+     "path": "llm/gemma-3-1b-it-Q4_0.gguf",
+     "size": 721918496,
+     "sha256": "27ee88e03be02e9ba73def9a819d570d8ad73716e50769e87f374ae394b0276e"
+    }
+   ],
+   "g15_s": 10.0,
+   "g15_measured": false
+  },
+  {
+   "id": "opus-mt-int8",
+   "component": "mt",
+   "engine": "marian",
+   "name": "Opus-MT Italian⇄English",
+   "note": "dedicated translation models (not an LLM); very fast, good everyday quality",
+   "ram_mb": 400,
+   "files": [
+    {
+     "url": "https://huggingface.co/Xenova/opus-mt-it-en/resolve/main/config.json",
+     "path": "opus/it-en/config.json",
+     "size": 1376
+    },
+    {
+     "url": "https://huggingface.co/Xenova/opus-mt-it-en/resolve/main/tokenizer.json",
+     "path": "opus/it-en/tokenizer.json",
+     "size": 7942314
+    },
+    {
+     "url": "https://huggingface.co/Xenova/opus-mt-it-en/resolve/main/onnx/encoder_model_quantized.onnx",
+     "path": "opus/it-en/onnx/encoder_model_quantized.onnx",
+     "size": 60773278,
+     "sha256": "a025d2d85c90da23880116b67175e43e71921d8d2bf446b9f1eacdc86015aa4c"
+    },
+    {
+     "url": "https://huggingface.co/Xenova/opus-mt-it-en/resolve/main/onnx/decoder_model_merged_quantized.onnx",
+     "path": "opus/it-en/onnx/decoder_model_merged_quantized.onnx",
+     "size": 68147852,
+     "sha256": "aebc2789cd2ef8062fbda020bac90b61e68458ba98a4c43cea63c1d2310ba2b8"
+    },
+    {
+     "url": "https://huggingface.co/Xenova/opus-mt-en-it/resolve/main/config.json",
+     "path": "opus/en-it/config.json",
+     "size": 1376
+    },
+    {
+     "url": "https://huggingface.co/Xenova/opus-mt-en-it/resolve/main/tokenizer.json",
+     "path": "opus/en-it/tokenizer.json",
+     "size": 7904597
+    },
+    {
+     "url": "https://huggingface.co/Xenova/opus-mt-en-it/resolve/main/onnx/encoder_model_quantized.onnx",
+     "path": "opus/en-it/onnx/encoder_model_quantized.onnx",
+     "size": 60597150,
+     "sha256": "b51c5110c7ba356ef01ee400d427afe162e657de1d7a2e9a40deedd811b49e6f"
+    },
+    {
+     "url": "https://huggingface.co/Xenova/opus-mt-en-it/resolve/main/onnx/decoder_model_merged_quantized.onnx",
+     "path": "opus/en-it/onnx/decoder_model_merged_quantized.onnx",
+     "size": 67970348,
+     "sha256": "f9db146ed7665ea7d437dc4df564e3af5df923366de4d52aaf2c4b4e3e4ae4f1"
+    }
+   ],
+   "g15_s": 2.5,
+   "g15_measured": true
+  },
+  {
+   "id": "piper-en_US-ryan-medium",
+   "component": "voice",
+   "engine": "piper",
+   "lang": "en",
+   "name": "Piper Ryan (US)",
+   "gender": "male",
+   "note": "fallback English voice",
+   "ram_mb": 150,
+   "files": [
+    {
+     "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/ryan/medium/en_US-ryan-medium.onnx",
+     "path": "piper/en_US-ryan-medium.onnx",
+     "size": 63201294,
+     "sha256": "abf4c274862564ed647ba0d2c47f8ee7c9b717d27bdad9219100eb310db4047a"
+    },
+    {
+     "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/ryan/medium/en_US-ryan-medium.onnx.json",
+     "path": "piper/en_US-ryan-medium.onnx.json",
+     "size": 4883
+    }
+   ],
+   "g15_s": 0.7,
+   "g15_measured": true
+  },
+  {
+   "id": "piper-it_IT-riccardo-x_low",
+   "component": "voice",
+   "engine": "piper",
+   "lang": "it",
+   "name": "Piper Riccardo",
+   "gender": "male",
+   "note": "fallback Italian voice (robotic)",
+   "ram_mb": 150,
+   "files": [
+    {
+     "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/it/it_IT/riccardo/x_low/it_IT-riccardo-x_low.onnx",
+     "path": "piper/it_IT-riccardo-x_low.onnx",
+     "size": 28130791,
+     "sha256": "1368de15f123275a7ef951c9e5e30be0f58a032daa14a0da44037443c1d1d21b"
+    },
+    {
+     "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/it/it_IT/riccardo/x_low/it_IT-riccardo-x_low.onnx.json",
+     "path": "piper/it_IT-riccardo-x_low.onnx.json",
+     "size": 4161
+    }
+   ],
+   "g15_s": 0.7,
+   "g15_measured": true
+  },
+  {
+   "id": "piper-it_IT-paola-medium",
+   "component": "voice",
+   "engine": "piper",
+   "lang": "it",
+   "name": "Piper Paola",
+   "gender": "female",
+   "note": "nicer fallback Italian voice",
+   "ram_mb": 150,
+   "files": [
+    {
+     "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/it/it_IT/paola/medium/it_IT-paola-medium.onnx",
+     "path": "piper/it_IT-paola-medium.onnx",
+     "size": 63511038,
+     "sha256": "6fc918b5a0ea6137382833dddfa567bffbe6a5060c02043c87192ee59c04210c"
+    },
+    {
+     "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/it/it_IT/paola/medium/it_IT-paola-medium.onnx.json",
+     "path": "piper/it_IT-paola-medium.onnx.json",
+     "size": 7099
+    }
+   ],
+   "g15_s": 0.7,
+   "g15_measured": true
+  }
+ ],
+ "presets": [
+  {
+   "id": "laptop",
+   "name": "Same as laptop",
+   "note": "best quality; very slow on phones like the Moto G15",
+   "models": [
+    "whisper-large-v3-turbo-q5_0",
+    "translategemma-4b-q6_k",
+    "piper-en_US-ryan-medium",
+    "piper-it_IT-riccardo-x_low"
+   ]
+  },
+  {
+   "id": "balanced",
+   "name": "Balanced",
+   "note": "good quality, still slow on small phones",
+   "models": [
+    "whisper-small-q8_0",
+    "translategemma-4b-q4_k_m",
+    "piper-en_US-ryan-medium",
+    "piper-it_IT-riccardo-x_low"
+   ]
+  },
+  {
+   "id": "fast",
+   "name": "Fast",
+   "note": "a few seconds per sentence on small phones",
+   "models": [
+    "whisper-base-q8_0",
+    "opus-mt-int8",
+    "piper-en_US-ryan-medium",
+    "piper-it_IT-riccardo-x_low"
+   ]
+  }
+ ],
+ "default_preset": "laptop",
+ "reference": {
+  "device": "moto g15",
+  "gflops": 1.8,
+  "gbps": 4.5,
+  "note": "g15_s: seconds per ~4 s sentence measured on a Moto G15 (Helio G81), CPU x4; gflops/gbps: Estimator.measure() on that phone"
+ }
+}

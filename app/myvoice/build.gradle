@@ -1,0 +1,117 @@
+plugins {
+    id 'com.android.application'
+}
+
+// The native part (whisper.cpp, llama.cpp, espeak-ng) needs the NDK. `./gradlew -PnoNative ...`
+// builds and unit-tests the Java code without it.
+def withNative = !project.hasProperty('noNative')
+
+android {
+    namespace 'org.myvoice'
+    compileSdk 36
+    if (withNative) {
+        ndkVersion '28.2.13676358'
+    }
+
+    defaultConfig {
+        applicationId 'org.myvoice'
+        minSdk 33          // Android 13+: Java 11 String/collection APIs; the Moto G15 runs Android 15
+        targetSdk 35
+        versionCode 1
+        versionName '0.1.0'
+        testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
+        ndk {
+            // phones: arm64 only; `-Pemulator` adds x86_64 so the native code runs directly on the
+            // Android emulator instead of through its ARM translation
+            abiFilters(*(project.hasProperty('emulator') ? ['arm64-v8a', 'x86_64'] : ['arm64-v8a']))
+        }
+        if (withNative) {
+            externalNativeBuild {
+                cmake {
+                    arguments '-DANDROID_STL=c++_shared',
+                              "-DMYVOICE_THIRD_PARTY=${rootProject.file('third_party')}"
+                }
+            }
+        }
+    }
+
+    if (withNative) {
+        externalNativeBuild {
+            cmake {
+                path 'src/main/cpp/CMakeLists.txt'
+                version '3.31.6'
+            }
+        }
+    }
+
+    buildTypes {
+        debug {
+            // ggml/whisper/llama are far too slow without optimisation, even in debug builds
+            externalNativeBuild { cmake { arguments '-DCMAKE_BUILD_TYPE=Release' } }
+        }
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.debug   // personal app: sign release builds with the debug key
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    buildFeatures {
+        viewBinding true
+        buildConfig true
+    }
+
+    packaging {
+        jniLibs {
+            // ggml loads its CPU/Vulkan/OpenCL backends with dlopen() from the app's native library
+            // directory, so the .so files must be extracted there.
+            useLegacyPackaging true
+            // libOpenCL.so is only linked against at build time; at run time the phone's own driver
+            // is used (declared with <uses-native-library> in the manifest).
+            excludes += ['**/libOpenCL.so']
+            pickFirsts += ['**/libggml-*.so']
+        }
+    }
+
+    testOptions {
+        unitTests.returnDefaultValues = true
+    }
+}
+
+// ggml's backend modules (CPU variants, Vulkan, OpenCL) are CMake MODULE libraries: nothing links
+// them (they are loaded with dlopen at run time), so AGP doesn't package them by itself.
+def ggmlModules = layout.buildDirectory.dir('ggml-modules')
+android.sourceSets.main.jniLibs.srcDir(ggmlModules.get().asFile)
+def copyGgmlModules = tasks.register('copyGgmlModules', Copy) {
+    from(fileTree(layout.buildDirectory.dir('intermediates/cxx')).matching {
+        include '**/obj/*/libggml-cpu-*.so', '**/obj/*/libggml-vulkan.so', '**/obj/*/libggml-opencl.so'
+    })
+    into(ggmlModules)
+    eachFile { path = "${file.parentFile.name}/${name}" }   // keep the ABI folder
+    includeEmptyDirs = false
+    mustRunAfter(tasks.matching { it.name.startsWith('buildCMake') || it.name.startsWith('externalNativeBuild') })
+}
+tasks.configureEach { t ->
+    if (t.name.startsWith('buildCMake')) {
+        t.finalizedBy(copyGgmlModules)
+    }
+    if (t.name ==~ /merge.*JniLibFolders/ || t.name ==~ /merge.*NativeLibs/) {
+        t.dependsOn(copyGgmlModules)
+    }
+}
+
+dependencies {
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+    implementation 'com.google.android.material:material:1.12.0'
+    implementation 'androidx.recyclerview:recyclerview:1.3.2'
+    implementation 'androidx.preference:preference:1.2.1'
+    implementation 'com.microsoft.onnxruntime:onnxruntime-android:1.31.0'
+
+    testImplementation 'junit:junit:4.13.2'
+    androidTestImplementation 'androidx.test.ext:junit:1.2.1'
+    androidTestImplementation 'androidx.test:runner:1.6.2'
+}

@@ -1,0 +1,21 @@
+[submodule "app/third_party/llama.cpp"]
+	path = app/third_party/llama.cpp
+	url = https://github.com/ggml-org/llama.cpp
+[submodule "app/third_party/whisper.cpp"]
+	path = app/third_party/whisper.cpp
+	url = https://github.com/ggml-org/whisper.cpp
+[submodule "app/third_party/espeak-ng"]
+	path = app/third_party/espeak-ng
+	url = https://github.com/espeak-ng/espeak-ng
+[submodule "app/third_party/Vulkan-Headers"]
+	path = app/third_party/Vulkan-Headers
+	url = https://github.com/KhronosGroup/Vulkan-Headers
+[submodule "app/third_party/OpenCL-Headers"]
+	path = app/third_party/OpenCL-Headers
+	url = https://github.com/KhronosGroup/OpenCL-Headers
+[submodule "app/third_party/OpenCL-ICD-Loader"]
+	path = app/third_party/OpenCL-ICD-Loader
+	url = https://github.com/KhronosGroup/OpenCL-ICD-Loader
+[submodule "app/third_party/SPIRV-Headers"]
+	path = app/third_party/SPIRV-Headers
+	url = https://github.com/KhronosGroup/SPIRV-Headers
